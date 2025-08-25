@@ -1,6 +1,8 @@
 # DSARC-MSND-Manager
 
-An editor for **DSARC** and **MSND** archives by *Nippon Ichi Software*, built in **C# (.NET Framework 4.8)**.
+An editor for **DSARC** and **MSND** archives by *Nippon Ichi Software*, built with **C# (.NET 9.0)**.
+
+**Requirement:** You need to install the [.NET Desktop Runtime 9.0](https://dotnet.microsoft.com/en-us/download/dotnet/9.0) for this program to run.
 
 ---
 
@@ -18,4 +20,6 @@ An editor for **DSARC** and **MSND** archives by *Nippon Ichi Software*, built i
 ---
 
 ## Notes
-This project is still a work in progress. Contributions and suggestions are welcome.
+
+This project is still a work in progress.  
+Contributions, feedback, and suggestions are welcome!
