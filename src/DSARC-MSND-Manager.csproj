@@ -7,9 +7,7 @@
 		<RuntimeIdentifier>win-x86</RuntimeIdentifier>
 		<PublishSingleFile>true</PublishSingleFile>
 		<SelfContained>true</SelfContained>
-		<PublishReadyToRun>true</PublishReadyToRun>
 		<EmitSymbols>false</EmitSymbols>
-		<DebugType>none</DebugType>
 		<OutputType>WinExe</OutputType>
 		<StartupObject>Manager.Program</StartupObject>
 		<ApplicationIcon>icon.ico</ApplicationIcon>
@@ -22,10 +20,9 @@
 		<DebugSymbols>false</DebugSymbols>
 		<DebugType>none</DebugType>
 		<GenerateDocumentationFile>false</GenerateDocumentationFile>
-		<PublishReadyToRun>true</PublishReadyToRun>
+		<PublishReadyToRun>false</PublishReadyToRun>
 	</PropertyGroup>
 	<PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|AnyCPU'">
-		<Optimize>True</Optimize>
 	</PropertyGroup>
 	<ItemGroup>
 		<Content Include="icon.ico" />
