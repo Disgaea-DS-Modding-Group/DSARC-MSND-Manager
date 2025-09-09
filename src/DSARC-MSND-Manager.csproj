@@ -14,6 +14,7 @@
 		<NuGetAudit>False</NuGetAudit>
 		<PlatformTarget>AnyCPU</PlatformTarget>
 		<EnforceCodeStyleInBuild>True</EnforceCodeStyleInBuild>
+		<AllowUnsafeBlocks>true</AllowUnsafeBlocks>
 	</PropertyGroup>
 	<PropertyGroup Condition="'$(Configuration)'=='Release'">
 		<Optimize>true</Optimize>
@@ -26,5 +27,25 @@
 	</PropertyGroup>
 	<ItemGroup>
 		<Content Include="icon.ico" />
+	</ItemGroup>
+	<ItemGroup>
+	  <PackageReference Include="LibVLCSharp.WinForms" Version="3.9.4" />
+	  <PackageReference Include="NAudio" Version="2.0.1" />
+	  <PackageReference Include="Sanford.Multimedia.Midi" Version="6.6.2" />
+	  <PackageReference Include="Syroot.BinaryData" Version="5.2.2" />
+	  <PackageReference Include="VGAudio" Version="2.2.1" />
+	</ItemGroup>
+	<ItemGroup>
+	  <Compile Update="Nitro Studio 2\Properties\Settings.Designer.cs">
+	    <DesignTimeSharedInput>True</DesignTimeSharedInput>
+	    <AutoGen>True</AutoGen>
+	    <DependentUpon>Settings.settings</DependentUpon>
+	  </Compile>
+	</ItemGroup>
+	<ItemGroup>
+	  <None Update="Nitro Studio 2\Properties\Settings.settings">
+	    <Generator>SettingsSingleFileGenerator</Generator>
+	    <LastGenOutput>Settings.Designer.cs</LastGenOutput>
+	  </None>
 	</ItemGroup>
 </Project>
