@@ -32,8 +32,15 @@
 	  <PackageReference Include="LibVLCSharp.WinForms" Version="3.9.4" />
 	  <PackageReference Include="NAudio" Version="2.0.1" />
 	  <PackageReference Include="Sanford.Multimedia.Midi" Version="6.6.2" />
+	  <PackageReference Include="Scintilla.NET" Version="5.3.2.9" />
+	  <PackageReference Include="ScintillaNET_FindReplaceDialog" Version="1.5.5" />
 	  <PackageReference Include="Syroot.BinaryData" Version="5.2.2" />
 	  <PackageReference Include="VGAudio" Version="2.2.1" />
+	</ItemGroup>
+	<ItemGroup>
+	  <Reference Include="SoundFont2">
+	    <HintPath>SoundFont2.dll</HintPath>
+	  </Reference>
 	</ItemGroup>
 	<ItemGroup>
 	  <Compile Update="Nitro Studio 2\Properties\Settings.Designer.cs">
