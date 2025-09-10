@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Windows.Forms;
 
 namespace NitroStudio2 {
@@ -41,3 +41,4 @@ namespace NitroStudio2 {
         }
     }
 }
+

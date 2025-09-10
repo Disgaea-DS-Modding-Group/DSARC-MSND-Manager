@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 namespace GotaSequenceLib.Playback {
     public abstract class AbstractTrack {
         public readonly byte Index;
@@ -91,3 +91,4 @@ namespace GotaSequenceLib.Playback {
     //     Panpot
     // }
 }
+

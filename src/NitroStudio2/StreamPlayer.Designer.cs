@@ -1,4 +1,4 @@
-﻿namespace NitroStudio2
+namespace NitroStudio2
 {
     partial class StreamPlayer
     {

@@ -1,4 +1,4 @@
-﻿using GotaSoundIO.IO;
+using GotaSoundIO.IO;
 using GotaSoundIO.Sound.Encoding;
 using System;
 using System.Collections.Generic;
@@ -509,3 +509,4 @@ namespace GotaSoundIO.Sound {
     }
 
 }
+

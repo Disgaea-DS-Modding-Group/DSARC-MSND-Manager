@@ -1,4 +1,4 @@
-﻿using System.Diagnostics;
+using System.Diagnostics;
 using System.Threading;
 
 namespace GotaSequenceLib.Playback {
@@ -51,3 +51,4 @@ namespace GotaSequenceLib.Playback {
     }
 
 }
+

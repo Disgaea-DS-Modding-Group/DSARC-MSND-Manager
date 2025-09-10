@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.IO;
 using System.Threading;
 using System.Windows.Forms;
@@ -63,13 +63,14 @@ namespace NitroStudio2
                 if (File.Exists(Path))
                     File.Delete(Path);
             }
-            catch { /* ignore */ }
+            catch {  }
 
             try
             {
                 MainWindow.StreamTempCount--;
             }
-            catch { /* ignore */ }
+            catch {  }
         }
     }
 }
+

@@ -1,4 +1,4 @@
-﻿using GotaSoundIO.Sound.Playback;
+using GotaSoundIO.Sound.Playback;
 using NAudio.CoreAudioApi;
 using NAudio.Wave;
 using System;
@@ -309,3 +309,4 @@ namespace GotaSequenceLib.Playback {
     }
 
 }
+

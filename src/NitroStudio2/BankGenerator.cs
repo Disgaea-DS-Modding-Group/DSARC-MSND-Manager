@@ -1,4 +1,4 @@
-﻿using GotaSequenceLib.Playback;
+using GotaSequenceLib.Playback;
 using NitroFileLoader;
 using System;
 using System.Collections.Generic;
@@ -427,3 +427,4 @@ namespace NitroStudio2 {
     }
 
 }
+

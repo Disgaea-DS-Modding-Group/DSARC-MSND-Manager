@@ -1,4 +1,4 @@
-﻿using GotaSequenceLib;
+using GotaSequenceLib;
 using GotaSequenceLib.Playback;
 using GotaSoundIO.IO;
 using System;
@@ -154,3 +154,4 @@ namespace NitroFileLoader {
     }
 
 }
+

@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Numerics;
 using System.Reflection;
 
@@ -241,3 +241,4 @@ public partial class EndianBinaryWriter
 		}
 	}
 }
+

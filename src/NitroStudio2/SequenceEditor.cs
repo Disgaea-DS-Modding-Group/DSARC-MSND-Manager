@@ -1,4 +1,4 @@
-﻿using GotaSequenceLib;
+using GotaSequenceLib;
 using GotaSequenceLib.Playback;
 using GotaSoundIO.IO;
 using GotaSoundIO.Sound;
@@ -2146,3 +2146,4 @@ namespace NitroStudio2
     }
 
 }
+

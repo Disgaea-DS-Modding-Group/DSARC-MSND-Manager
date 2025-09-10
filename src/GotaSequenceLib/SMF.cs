@@ -1,4 +1,4 @@
-﻿using GotaSequenceLib.Playback;
+using GotaSequenceLib.Playback;
 using Sanford.Multimedia.Midi;
 using System;
 using System.Collections.Generic;
@@ -1198,3 +1198,4 @@ namespace GotaSequenceLib {
     }
 
 }
+

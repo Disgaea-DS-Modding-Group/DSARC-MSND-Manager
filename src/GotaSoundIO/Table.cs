@@ -1,4 +1,4 @@
-﻿using GotaSoundIO.IO;
+using GotaSoundIO.IO;
 using System;
 using System.Collections;
 using System.Collections.Generic;
@@ -175,3 +175,4 @@ namespace GotaSoundIO {
     }
 
 }
+

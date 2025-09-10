@@ -1,4 +1,4 @@
-﻿using GotaSoundIO.Sound;
+using GotaSoundIO.Sound;
 using GotaSoundIO.IO.RIFF;
 using System;
 using System.Collections.Generic;
@@ -557,3 +557,4 @@ namespace GotaSoundBank.DLS {
     }
 
 }
+

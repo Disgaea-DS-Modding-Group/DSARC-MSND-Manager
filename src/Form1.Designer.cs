@@ -1,4 +1,4 @@
-﻿namespace Manager
+namespace Manager
 {
     partial class Form1
     {

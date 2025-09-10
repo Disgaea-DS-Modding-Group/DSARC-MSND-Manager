@@ -1,4 +1,4 @@
-﻿namespace Properties
+namespace Properties
 {
     internal static class Resources
     {
@@ -42,3 +42,4 @@
         public const string Error_FileExistsCannotCreateFolder = "A file named '{0}' already exists in the selected folder; cannot create folder.";
     }
 }
+

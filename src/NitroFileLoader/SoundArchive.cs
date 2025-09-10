@@ -1,4 +1,4 @@
-﻿using GotaSoundIO;
+using GotaSoundIO;
 using GotaSoundIO.IO;
 using GotaSoundIO.Sound;
 using System;
@@ -1439,3 +1439,4 @@ namespace NitroFileLoader {
     }
 
 }
+

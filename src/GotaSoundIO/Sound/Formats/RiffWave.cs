@@ -1,4 +1,4 @@
-﻿using GotaSoundIO.IO;
+using GotaSoundIO.IO;
 using GotaSoundIO.IO.RIFF;
 using System;
 using System.Collections.Generic;
@@ -139,8 +139,8 @@ namespace GotaSoundIO.Sound {
                     rw.Write(new uint[3]);
                     rw.Write((uint)1);
                     rw.Write(new uint[3]);
-                    rw.Write(LoopStart/* * bitsPerSample / 8*/);
-                    rw.Write(LoopEnd/* * bitsPerSample / 8*/);
+                    rw.Write(LoopStart);
+                    rw.Write(LoopEnd);
                     rw.Write((ulong)0);
                     rw.EndChunk();
                 }
@@ -167,3 +167,4 @@ namespace GotaSoundIO.Sound {
     }
 
 }
+

@@ -1,4 +1,4 @@
-﻿namespace GotaSequenceLib.Playback {
+namespace GotaSequenceLib.Playback {
 
     /// <summary>
     /// Utils.
@@ -331,3 +331,4 @@
     }
 
 }
+

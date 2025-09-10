@@ -1,4 +1,4 @@
-﻿using GotaSoundIO.Sound;
+using GotaSoundIO.Sound;
 using NitroFileLoader;
 using System;
 using System.Collections.Generic;
@@ -98,3 +98,4 @@ namespace NitroStudio2 {
 
     }
 }
+

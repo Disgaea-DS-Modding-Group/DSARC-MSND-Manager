@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 
 namespace Kermalis.EndianBinaryIO;
 
@@ -109,3 +109,4 @@ public sealed class BinaryStringTrimNullTerminatorsAttribute : Attribute, IBinar
 		Value = trim;
 	}
 }
+

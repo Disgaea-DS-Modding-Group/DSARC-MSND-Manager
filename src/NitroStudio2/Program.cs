@@ -1,4 +1,4 @@
-﻿using GotaSoundBank.DLS;
+using GotaSoundBank.DLS;
 using GotaSoundBank.SF2;
 using GotaSoundIO.Sound;
 using NitroFileLoader;
@@ -80,3 +80,4 @@ namespace NitroStudio2 {
         }
     }
 }
+

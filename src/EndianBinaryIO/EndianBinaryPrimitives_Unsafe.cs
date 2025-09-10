@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Buffers.Binary;
 using System.Numerics;
 using System.Runtime.CompilerServices;
@@ -1586,3 +1586,4 @@ public static partial class EndianBinaryPrimitives
 
 	#endregion
 }
+

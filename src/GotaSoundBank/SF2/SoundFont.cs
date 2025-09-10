@@ -1,4 +1,4 @@
-﻿using GotaSoundBank.DLS;
+using GotaSoundBank.DLS;
 using GotaSoundIO.IO;
 using GotaSoundIO.IO.RIFF;
 using GotaSoundIO.Sound;
@@ -759,3 +759,4 @@ namespace GotaSoundBank.SF2 {
     }
 
 }
+

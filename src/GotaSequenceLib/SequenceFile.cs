@@ -1,4 +1,4 @@
-﻿using GotaSoundIO;
+using GotaSoundIO;
 using GotaSoundIO.IO;
 using System;
 using System.Collections.Generic;
@@ -576,3 +576,4 @@ namespace GotaSequenceLib {
     }
 
 }
+

@@ -1,4 +1,4 @@
-﻿using GotaSoundIO.Sound;
+using GotaSoundIO.Sound;
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -138,3 +138,4 @@ namespace GotaSoundIO.IO.RIFF {
     }
 
 }
+
