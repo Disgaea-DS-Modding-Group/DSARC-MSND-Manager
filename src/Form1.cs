@@ -9,6 +9,7 @@ using System.Runtime.Versioning;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Windows.Forms;
+using NitroStudio2;
 namespace Manager
 {
     [SupportedOSPlatform("windows6.1")]
@@ -85,6 +86,7 @@ namespace Manager
             saveAsToolStripMenuItem.Click += async (s, e) => await SaveAsAsync().ConfigureAwait(false);
             exitToolStripMenuItem.Click += (s, e) => Close();
             treeView1.NodeMouseClick += TreeView1_NodeMouseClick;
+            treeView1.NodeMouseDoubleClick += TreeView1_NodeMouseDoubleClick;
         }
         private static string? SelectFolder(string? description = null)
         {
@@ -265,9 +267,92 @@ namespace Manager
         private void TreeView1_NodeMouseClick(object sender, TreeNodeMouseClickEventArgs e)
         {
             treeView1.SelectedNode = e.Node;
+
+            // Handle right-click context menu
             if (e.Button == MouseButtons.Right)
             {
                 ShowContextMenu(e.Node, e.Location);
+            }
+        }
+
+        private void TreeView1_NodeMouseDoubleClick(object sender, TreeNodeMouseClickEventArgs e)
+        {
+            treeView1.SelectedNode = e.Node;
+            HandleDoubleClick(e.Node);
+        }
+
+        private async void HandleDoubleClick(TreeNode node)
+        {
+            if (node?.Tag is not Entry entry)
+            {
+                AppendLog("Double-click: Node has no Entry tag.");
+                return;
+            }
+
+            // Handle .SSEQ file double click
+            if (entry.Path.Name.EndsWith(".sseq", StringComparison.OrdinalIgnoreCase))
+            {
+                AppendLog($"Double-click: SSEQ detected: {entry.Path.Name}");
+                try
+                {
+                    _cts?.Cancel();
+                    _cts = new CancellationTokenSource();
+                    CancellationToken ct = _cts.Token;
+
+                    byte[] fileData;
+                    AppendLog("Double-click: Starting extraction...");
+
+                    // If this is a child node of a MSND archive
+                    if (node.Parent?.Tag is Entry parentEntry && parentEntry.IsMsnd)
+                    {
+                        AppendLog($"Double-click: Extracting chunk from MSND parent: {parentEntry.Path.Name}");
+                        fileData = await _archiveService.ExtractChunkToBufferAsync(archivePath, parentEntry, entry, ct).ConfigureAwait(false);
+                    }
+                    else
+                    {
+                        AppendLog("Double-click: Extracting regular entry.");
+                        fileData = await _archiveService.ExtractToBufferAsync(archivePath, entry, ct).ConfigureAwait(false);
+                    }
+
+                    AppendLog($"Double-click: Extraction complete. Bytes: {fileData?.Length}");
+
+                    // Create temporary file
+                    string tempFile = Path.Combine(Path.GetTempPath(), entry.Path.Name);
+                    await File.WriteAllBytesAsync(tempFile, fileData, ct);
+                    AppendLog($"Double-click: Temp file written: {tempFile}");
+
+                    // Open in NitroStudio2 SequenceEditor
+                    _ = BeginInvoke(() =>
+                    {
+                        try
+                        {
+                            AppendLog($"Double-click: Launching SequenceEditor for {tempFile}");
+                            var editor = new SequenceEditor(tempFile);
+                            editor.Show();
+                            AppendLog("Double-click: SequenceEditor launched.");
+                        }
+                        catch (Exception ex)
+                        {
+                            ShowError($"Error opening sequence editor: {ex.Message}");
+                            AppendLog($"Double-click: Exception launching SequenceEditor: {ex.Message}");
+                        }
+                    });
+
+                    AppendLog($"Opened {entry.Path.Name} in sequence editor");
+                }
+                catch (OperationCanceledException)
+                {
+                    AppendLog("Open sequence cancelled.");
+                }
+                catch (Exception ex)
+                {
+                    ShowError($"Error extracting sequence: {ex.Message}");
+                    AppendLog($"Double-click: Exception during extraction: {ex.Message}");
+                }
+                finally
+                {
+                    _cts = null;
+                }
             }
         }
         private void ShowContextMenu(TreeNode node, System.Drawing.Point location)

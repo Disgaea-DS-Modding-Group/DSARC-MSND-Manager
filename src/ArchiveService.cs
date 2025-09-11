@@ -26,6 +26,8 @@ namespace Manager
         Task<byte[]> ReadFileAsync(string path, CancellationToken ct = default);
         Task<byte[]> ReadRangeAsync(string path, long offset, int size, CancellationToken ct = default);
         Task CopyFileToFolderAsync(string sourceFilePath, string destFolder, CancellationToken ct = default);
+        Task<byte[]> ExtractToBufferAsync(string archivePath, Entry entry, CancellationToken ct = default);
+        Task<byte[]> ExtractChunkToBufferAsync(string archivePath, Entry parentEntry, Entry chunkEntry, CancellationToken ct = default);
     }
     public class ArchiveService : IArchiveService
     {
@@ -737,6 +739,49 @@ namespace Manager
                 _ = Directory.CreateDirectory(destFolder);
                 string dest = Path.Combine(destFolder, Path.GetFileName(sourceFilePath));
                 File.Copy(sourceFilePath, dest, true);
+            }, ct).ConfigureAwait(false);
+        }
+        public async Task<byte[]> ExtractToBufferAsync(string archivePath, Entry entry, CancellationToken ct = default)
+        {
+            if (string.IsNullOrEmpty(archivePath))
+                throw new ArgumentNullException(nameof(archivePath));
+            if (entry == null)
+                throw new ArgumentNullException(nameof(entry));
+            return await Task.Run(() =>
+            {
+                ct.ThrowIfCancellationRequested();
+                using FileStream fs = new(archivePath, FileMode.Open, FileAccess.Read);
+                fs.Seek(entry.Offset, SeekOrigin.Begin);
+                byte[] data = new byte[entry.Size];
+                int read = fs.Read(data, 0, entry.Size);
+                if (read != entry.Size)
+                {
+                    byte[] trimmed = new byte[read];
+                    Array.Copy(data, 0, trimmed, 0, read);
+                    return trimmed;
+                }
+                return data;
+            }, ct).ConfigureAwait(false);
+        }
+        public async Task<byte[]> ExtractChunkToBufferAsync(string archivePath, Entry parentEntry, Entry chunkEntry, CancellationToken ct = default)
+        {
+            if (string.IsNullOrEmpty(archivePath))
+                throw new ArgumentNullException(nameof(archivePath));
+            if (parentEntry == null || chunkEntry == null)
+                throw new ArgumentNullException(parentEntry == null ? nameof(parentEntry) : nameof(chunkEntry));
+            return await Task.Run(() =>
+            {
+                ct.ThrowIfCancellationRequested();
+                byte[] msndBuf;
+                using (FileStream fs = new(archivePath, FileMode.Open, FileAccess.Read))
+                {
+                    fs.Seek(parentEntry.Offset, SeekOrigin.Begin);
+                    msndBuf = new byte[parentEntry.Size];
+                    fs.Read(msndBuf, 0, msndBuf.Length);
+                }
+                byte[] data = new byte[chunkEntry.Size];
+                Array.Copy(msndBuf, chunkEntry.Offset, data, 0, chunkEntry.Size);
+                return data;
             }, ct).ConfigureAwait(false);
         }
         private byte[] BuildDsarcFromFolder(string folder)
