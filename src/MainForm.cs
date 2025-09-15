@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.ComponentModel;
@@ -9,10 +9,10 @@ using System.Runtime.Versioning;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Windows.Forms;
-namespace Manager
+namespace DisgaeaDS_Manager
 {
     [SupportedOSPlatform("windows6.1")]
-    internal partial class Form1 : Form
+    internal partial class MainForm : Form
     {
         private string archivePath;
         private Collection<Entry> entries = [];
@@ -22,8 +22,8 @@ namespace Manager
         private bool archiveOpenedFromDisk;
         private readonly IArchiveService _archiveService;
         private CancellationTokenSource? _cts;
-        public Form1() : this(new ArchiveService()) { }
-        public Form1(IArchiveService archiveService)
+        public MainForm() : this(new ArchiveService()) { }
+        public MainForm(IArchiveService archiveService)
         {
             InitializeComponent();
             _archiveService = archiveService ?? throw new ArgumentNullException(nameof(archiveService));
@@ -67,7 +67,6 @@ namespace Manager
             {
                 return true;
             }
-
             try
             {
                 return System.Diagnostics.Process.GetCurrentProcess().ProcessName?.IndexOf("devenv", StringComparison.OrdinalIgnoreCase) >= 0;
@@ -113,7 +112,6 @@ namespace Manager
                 {
                     return;
                 }
-
                 archivePath = sfd.FileName;
             }
             entries = [];
@@ -134,7 +132,6 @@ namespace Manager
                 {
                     return;
                 }
-
                 archivePath = ofd.FileName;
             }
             try
@@ -218,7 +215,6 @@ namespace Manager
                 {
                     return;
                 }
-
                 archivePath = sfd.FileName;
             }
             await SaveArchiveAsync().ConfigureAwait(false);
@@ -273,7 +269,6 @@ namespace Manager
         private void ShowContextMenu(TreeNode node, System.Drawing.Point location)
         {
             ContextMenuStrip menu = new();
-
             menu.Closed += (s, e) =>
             {
                 try
@@ -336,7 +331,6 @@ namespace Manager
             {
                 return;
             }
-
             try
             {
                 _cts?.Cancel();
@@ -384,7 +378,6 @@ namespace Manager
             {
                 return;
             }
-
             try
             {
                 _cts?.Cancel();
@@ -432,7 +425,6 @@ namespace Manager
             {
                 return;
             }
-
             try
             {
                 _cts?.Cancel();
@@ -471,7 +463,6 @@ namespace Manager
             {
                 return;
             }
-
             try
             {
                 if (filetype == ArchiveType.MSND && !Msnd.MSNDORDER.Contains(Path.GetExtension(replacement).ToLowerInvariant()))
@@ -511,7 +502,6 @@ namespace Manager
             {
                 return;
             }
-
             try
             {
                 _cts?.Cancel();
@@ -554,7 +544,6 @@ namespace Manager
             {
                 return;
             }
-
             try
             {
                 _cts?.Cancel();
@@ -598,7 +587,6 @@ namespace Manager
             {
                 return;
             }
-
             try
             {
                 _cts?.Cancel();
@@ -609,7 +597,6 @@ namespace Manager
                 byte[] msndBuf = await _archiveService.ReadRangeAsync(archivePath, entry.Offset, entry.Size, ct).ConfigureAwait(false);
                 Progress<(int current, int total)> progress = new(t => UpdateProgress(t.current, t.total));
                 await _archive_service_NestedExtractBufferAsync(msndBuf, outDir, Path.GetFileNameWithoutExtension(entry.Path.Name), progress, ct).ConfigureAwait(false);
-
                 if (entry.Children.Count == 0)
                 {
                     foreach (Entry child in Msnd.Parse(msndBuf, Path.GetFileNameWithoutExtension(entry.Path.Name)))
@@ -651,7 +638,6 @@ namespace Manager
             {
                 return;
             }
-
             try
             {
                 _cts?.Cancel();
@@ -699,7 +685,6 @@ namespace Manager
             {
                 return;
             }
-
             string expected = Path.GetFileNameWithoutExtension(archivePath);
             string outdir = ResolveSelectedFolderForExpected(dlg, expected, out bool found, out int matches);
             if (!found)
@@ -761,7 +746,6 @@ namespace Manager
             {
                 return;
             }
-
             string expected = Path.GetFileNameWithoutExtension(entry.Path.Name);
             string outdir = ResolveSelectedFolderForExpected(dlg, expected, out bool found, out int matches);
             if (!found)
@@ -819,7 +803,6 @@ namespace Manager
             {
                 return null;
             }
-
             try
             {
                 if (string.Equals(Path.GetFileName(selectedPath), expectedFolderName, StringComparison.OrdinalIgnoreCase))
@@ -866,7 +849,6 @@ namespace Manager
             {
                 return;
             }
-
             if (InvokeRequired)
             {
                 _ = BeginInvoke(() => UpdateProgress(val, total));

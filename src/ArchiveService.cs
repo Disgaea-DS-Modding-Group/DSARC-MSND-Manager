@@ -6,9 +6,9 @@ using System.Linq;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
-namespace Manager
+namespace DisgaeaDS_Manager
 {
-    public interface IArchiveService
+    internal interface IArchiveService
     {
         Task<Collection<Entry>> LoadArchiveAsync(string archivePath, CancellationToken ct = default);
         Task SaveArchiveAsync(string path, ArchiveType type, IList<Entry> entries, string srcFolder, IProgress<(int current, int total)> progress, CancellationToken ct);
@@ -27,9 +27,13 @@ namespace Manager
         Task<byte[]> ReadRangeAsync(string path, long offset, int size, CancellationToken ct = default);
         Task CopyFileToFolderAsync(string sourceFilePath, string destFolder, CancellationToken ct = default);
     }
-    public class ArchiveService : IArchiveService
+    internal class ArchiveService : IArchiveService
     {
         private readonly TupleComparer _tupleComparer = new();
+        private static readonly char[] separator = new[] { '=' };
+        internal static readonly char[] separatorArray = new[] { '=' };
+        internal static readonly string[] sourceArray = new[] { ".sseq", ".sbnk", ".swar" };
+
         public async Task<Collection<Entry>> LoadArchiveAsync(string archivePath, CancellationToken ct = default)
         {
             return await Task.Run(() =>
@@ -46,17 +50,14 @@ namespace Manager
             {
                 throw new ArgumentNullException(nameof(path));
             }
-
             if (entries == null || entries.Count == 0)
             {
                 throw new ArgumentException("No entries to save", nameof(entries));
             }
-
             if (string.IsNullOrEmpty(srcFolder))
             {
                 throw new ArgumentNullException(nameof(srcFolder));
             }
-
             await Task.Run(() =>
             {
                 ct.ThrowIfCancellationRequested();
@@ -74,7 +75,6 @@ namespace Manager
                         {
                             throw new FileNotFoundException($"Missing {ext} in {srcFolder}");
                         }
-
                         chunks[ext] = File.ReadAllBytes(sourcePath);
                         progress?.Report((i + 1, total));
                     }
@@ -98,7 +98,7 @@ namespace Manager
                                 progress?.Report((i + 1, total));
                                 continue;
                             }
-                            string[] parts = ln.Split(new[] { '=' }, 2);
+                            string[] parts = ln.Split(separator, 2);
                             string left = parts[0].Trim();
                             string right = parts[1].Trim();
                             string candidate = Path.Combine(srcFolder, right);
@@ -153,7 +153,6 @@ namespace Manager
                                 {
                                     throw new InvalidOperationException($"Failed to rebuild nested archive at {candidate}");
                                 }
-
                                 pairs.Add(Tuple.Create(e.Path.ToString(), childBuf));
                                 progress?.Report((i + 1, total));
                                 continue;
@@ -188,7 +187,6 @@ namespace Manager
                 {
                     throw new DirectoryNotFoundException(folder);
                 }
-
                 ImportResult result = new() { SourceFolder = folder };
                 string mappingFile = Path.Combine(folder, "mapper.txt");
                 if (File.Exists(mappingFile))
@@ -200,8 +198,7 @@ namespace Manager
                         {
                             continue;
                         }
-
-                        string[] parts = ln.Split(new[] { '=' }, 2);
+                        string[] parts = ln.Split(separator, 2);
                         string left = parts[0].Trim();
                         string right = parts[1].Trim();
                         string candidate = Path.Combine(folder, right);
@@ -267,7 +264,6 @@ namespace Manager
                         {
                             throw new FileNotFoundException($"Missing expected MSND file {ext}");
                         }
-
                         result.Entries.Add(new Entry(new FileInfo(Path.GetFileName(chosen))));
                     }
                     return result;
@@ -386,17 +382,11 @@ namespace Manager
             {
                 throw new ArgumentNullException(nameof(archivePath));
             }
-
-            if (entry == null)
-            {
-                throw new ArgumentNullException(nameof(entry));
-            }
-
+            ArgumentNullException.ThrowIfNull(entry);
             if (string.IsNullOrEmpty(destFolder))
             {
                 throw new ArgumentNullException(nameof(destFolder));
             }
-
             await Task.Run(() =>
             {
                 ct.ThrowIfCancellationRequested();
@@ -428,17 +418,14 @@ namespace Manager
             {
                 throw new ArgumentNullException(parentEntry == null ? nameof(parentEntry) : nameof(chunkEntry));
             }
-
             if (string.IsNullOrEmpty(archivePath))
             {
                 throw new ArgumentNullException(nameof(archivePath));
             }
-
             if (string.IsNullOrEmpty(destFolder))
             {
                 throw new ArgumentNullException(nameof(destFolder));
             }
-
             await Task.Run(() =>
             {
                 ct.ThrowIfCancellationRequested();
@@ -494,7 +481,6 @@ namespace Manager
                 {
                     return null;
                 }
-
                 string mapperPath = Path.Combine(folder, "mapper.txt");
                 if (File.Exists(mapperPath))
                 {
@@ -506,8 +492,7 @@ namespace Manager
                         {
                             continue;
                         }
-
-                        string[] parts = ln.Split(new[] { '=' }, 2);
+                        string[] parts = ln.Split(separatorArray, 2);
                         string left = parts[0].Trim();
                         string right = parts[1].Trim();
                         string candidatePath = Path.Combine(folder, right);
@@ -518,7 +503,6 @@ namespace Manager
                             {
                                 throw new InvalidOperationException($"Failed to rebuild nested archive at {candidatePath}");
                             }
-
                             pairs.Add(Tuple.Create(left, childBuf));
                             continue;
                         }
@@ -538,8 +522,7 @@ namespace Manager
                     return Dsarc.BuildFromPairs(pairs);
                 }
                 string baseName = Path.GetFileName(folder);
-                string[] msndFiles = new[] { ".sseq", ".sbnk", ".swar" }
-                    .Select(ext => Directory.GetFiles(folder, $"*{ext}", SearchOption.TopDirectoryOnly).FirstOrDefault())
+                string[] msndFiles = sourceArray.Select(ext => Directory.GetFiles(folder, $"*{ext}", SearchOption.TopDirectoryOnly).FirstOrDefault())
                     .ToArray();
                 if (msndFiles.Any(f => f != null))
                 {
@@ -553,7 +536,6 @@ namespace Manager
                         {
                             throw new FileNotFoundException($"Missing expected MSND file {ext} in {folder}");
                         }
-
                         chunks[ext] = File.ReadAllBytes(chosen);
                     }
                     byte[]? txtBytes = null;
@@ -562,7 +544,6 @@ namespace Manager
                     {
                         txtBytes = File.ReadAllBytes(txtPath);
                     }
-
                     return Msnd.Build(chunks, txtBytes);
                 }
                 string[] files = Directory.GetFiles(folder, "*", SearchOption.TopDirectoryOnly);
@@ -578,7 +559,6 @@ namespace Manager
                 {
                     return;
                 }
-
                 _ = Directory.CreateDirectory(outdir);
                 if (buf.Length >= 4 && buf.Take(4).SequenceEqual(Msnd.MAGICMSND))
                 {
@@ -681,7 +661,6 @@ namespace Manager
             {
                 throw new ArgumentNullException(nameof(path));
             }
-
             await Task.Run(() =>
             {
                 ct.ThrowIfCancellationRequested();
@@ -725,12 +704,10 @@ namespace Manager
             {
                 throw new ArgumentNullException(nameof(sourceFilePath));
             }
-
             if (string.IsNullOrEmpty(destFolder))
             {
                 throw new ArgumentNullException(nameof(destFolder));
             }
-
             await Task.Run(() =>
             {
                 ct.ThrowIfCancellationRequested();
@@ -745,7 +722,6 @@ namespace Manager
             {
                 throw new DirectoryNotFoundException(folder);
             }
-
             string mapper = Path.Combine(folder, "mapper.txt");
             if (File.Exists(mapper))
             {
@@ -756,8 +732,7 @@ namespace Manager
                     {
                         continue;
                     }
-
-                    string[] parts = ln.Split(new[] { '=' }, 2);
+                    string[] parts = ln.Split(separatorArray, 2);
                     string left = parts[0].Trim();
                     string right = parts[1].Trim();
                     string candidate = Path.Combine(folder, right);
@@ -768,7 +743,6 @@ namespace Manager
                         {
                             throw new InvalidOperationException($"Failed to rebuild nested archive at {candidate}");
                         }
-
                         pairs.Add(Tuple.Create(left, child));
                         continue;
                     }
@@ -802,7 +776,6 @@ namespace Manager
             {
                 throw new DirectoryNotFoundException(folder);
             }
-
             string baseName = Path.GetFileName(folder);
             Dictionary<string, byte[]> chunks = new(StringComparer.OrdinalIgnoreCase);
             foreach (string ext in Msnd.MSNDORDER)
@@ -813,7 +786,6 @@ namespace Manager
                 {
                     throw new FileNotFoundException($"Missing expected MSND file {ext} in {folder}");
                 }
-
                 chunks[ext] = File.ReadAllBytes(chosen);
             }
             byte[]? txtBytes = null;
@@ -822,7 +794,6 @@ namespace Manager
             {
                 txtBytes = File.ReadAllBytes(txtPath);
             }
-
             return Msnd.Build(chunks, txtBytes);
         }
         private static string UniqueOutName(string baseName, string ext, string outdir, Dictionary<Tuple<string, string>, int> counters)

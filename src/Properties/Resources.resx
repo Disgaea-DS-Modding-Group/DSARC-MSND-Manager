@@ -1,84 +1,9 @@
 ﻿<?xml version="1.0" encoding="utf-8"?>
 <root>
-  <!-- 
-    Microsoft ResX Schema 
-    
-    Version 2.0
-    
-    The primary goals of this format is to allow a simple XML format 
-    that is mostly human readable. The generation and parsing of the 
-    various data types are done through the TypeConverter classes 
-    associated with the data types.
-    
-    Example:
-    
-    ... ado.net/XML headers & schema ...
-    <resheader name="resmimetype">text/microsoft-resx</resheader>
-    <resheader name="version">2.0</resheader>
-    <resheader name="reader">System.Resources.ResXResourceReader, System.Windows.Forms, ...</resheader>
-    <resheader name="writer">System.Resources.ResXResourceWriter, System.Windows.Forms, ...</resheader>
-    <data name="Name1"><value>this is my long string</value><comment>this is a comment</comment></data>
-    <data name="Color1" type="System.Drawing.Color, System.Drawing">Blue</data>
-    <data name="Bitmap1" mimetype="application/x-microsoft.net.object.binary.base64">
-        <value>[base64 mime encoded serialized .NET Framework object]</value>
-    </data>
-    <data name="Icon1" type="System.Drawing.Icon, System.Drawing" mimetype="application/x-microsoft.net.object.bytearray.base64">
-        <value>[base64 mime encoded string representing a byte array form of the .NET Framework object]</value>
-        <comment>This is a comment</comment>
-    </data>
-                
-    There are any number of "resheader" rows that contain simple 
-    name/value pairs.
-    
-    Each data row contains a name, and value. The row also contains a 
-    type or mimetype. Type corresponds to a .NET class that support 
-    text/value conversion through the TypeConverter architecture. 
-    Classes that don't support this are serialized and stored with the 
-    mimetype set.
-    
-    The mimetype is used for serialized objects, and tells the 
-    ResXResourceReader how to depersist the object. This is currently not 
-    extensible. For a given mimetype the value must be set accordingly:
-    
-    Note - application/x-microsoft.net.object.binary.base64 is the format 
-    that the ResXResourceWriter will generate, however the reader can 
-    read any of the formats listed below.
-    
-    mimetype: application/x-microsoft.net.object.binary.base64
-    value   : The object must be serialized with 
-            : System.Serialization.Formatters.Binary.BinaryFormatter
-            : and then encoded with base64 encoding.
-    
-    mimetype: application/x-microsoft.net.object.soap.base64
-    value   : The object must be serialized with 
-            : System.Runtime.Serialization.Formatters.Soap.SoapFormatter
-            : and then encoded with base64 encoding.
-
-    mimetype: application/x-microsoft.net.object.bytearray.base64
-    value   : The object must be serialized into a byte array 
-            : using a System.ComponentModel.TypeConverter
-            : and then encoded with base64 encoding.
-    -->
   <xsd:schema id="root" xmlns="" xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:msdata="urn:schemas-microsoft-com:xml-msdata">
     <xsd:element name="root" msdata:IsDataSet="true">
       <xsd:complexType>
         <xsd:choice maxOccurs="unbounded">
-          <xsd:element name="metadata">
-            <xsd:complexType>
-              <xsd:sequence>
-                <xsd:element name="value" type="xsd:string" minOccurs="0" />
-              </xsd:sequence>
-              <xsd:attribute name="name" type="xsd:string" />
-              <xsd:attribute name="type" type="xsd:string" />
-              <xsd:attribute name="mimetype" type="xsd:string" />
-            </xsd:complexType>
-          </xsd:element>
-          <xsd:element name="assembly">
-            <xsd:complexType>
-              <xsd:attribute name="alias" type="xsd:string" />
-              <xsd:attribute name="name" type="xsd:string" />
-            </xsd:complexType>
-          </xsd:element>
           <xsd:element name="data">
             <xsd:complexType>
               <xsd:sequence>
@@ -90,28 +15,122 @@
               <xsd:attribute name="mimetype" type="xsd:string" msdata:Ordinal="4" />
             </xsd:complexType>
           </xsd:element>
-          <xsd:element name="resheader">
-            <xsd:complexType>
-              <xsd:sequence>
-                <xsd:element name="value" type="xsd:string" minOccurs="0" msdata:Ordinal="1" />
-              </xsd:sequence>
-              <xsd:attribute name="name" type="xsd:string" use="required" />
-            </xsd:complexType>
-          </xsd:element>
         </xsd:choice>
       </xsd:complexType>
     </xsd:element>
   </xsd:schema>
-  <resheader name="resmimetype">
-    <value>text/microsoft-resx</value>
-  </resheader>
-  <resheader name="version">
-    <value>2.0</value>
-  </resheader>
-  <resheader name="reader">
-    <value>System.Resources.ResXResourceReader, System.Windows.Forms, Version=2.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
-  </resheader>
-  <resheader name="writer">
-    <value>System.Resources.ResXResourceWriter, System.Windows.Forms, Version=2.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
-  </resheader>
+  <data name="Filter_DatMsnd" xml:space="preserve">
+    <value>DAT/MSND Files (*.dat;*.msnd)|*.dat;*.msnd</value>
+  </data>
+  <data name="Status_MSND_Saved" xml:space="preserve">
+    <value>MSND saved</value>
+  </data>
+  <data name="Status_DSARC_Saved" xml:space="preserve">
+    <value>DSARC saved</value>
+  </data>
+  <data name="Status_FolderImported" xml:space="preserve">
+    <value>Folder imported</value>
+  </data>
+  <data name="Status_ExtractComplete" xml:space="preserve">
+    <value>Extract complete</value>
+  </data>
+  <data name="Status_FileReplaced" xml:space="preserve">
+    <value>File replaced.</value>
+  </data>
+  <data name="Status_FileReplacedUseSave" xml:space="preserve">
+    <value>File replaced. Use Save to rebuild DSARC/MSND.</value>
+  </data>
+  <data name="Status_ImportedAndStaged" xml:space="preserve">
+    <value>Imported and staged embedded archive (use Save to write).</value>
+  </data>
+  <data name="Status_NestedImportComplete" xml:space="preserve">
+    <value>Nested import complete</value>
+  </data>
+  <data name="Status_NestedExtractComplete" xml:space="preserve">
+    <value>Nested extract complete</value>
+  </data>
+  <data name="Status_ExtractedFormat" xml:space="preserve">
+    <value>{0} extracted</value>
+  </data>
+  <data name="Menu_ImportFolder" xml:space="preserve">
+    <value>Import Folder...</value>
+  </data>
+  <data name="Menu_ExtractAll" xml:space="preserve">
+    <value>Extract All...</value>
+  </data>
+  <data name="Menu_ExtractAllNested" xml:space="preserve">
+    <value>Extract All (Nested)...</value>
+  </data>
+  <data name="Menu_Extract" xml:space="preserve">
+    <value>Extract</value>
+  </data>
+  <data name="Menu_Replace" xml:space="preserve">
+    <value>Replace</value>
+  </data>
+  <data name="Dialog_SelectFolderToImport" xml:space="preserve">
+    <value>Select folder to import</value>
+  </data>
+  <data name="Dialog_ChooseOutputFolderForExtractAll" xml:space="preserve">
+    <value>Choose output folder for Extract All</value>
+  </data>
+  <data name="Dialog_SelectFolderToExtractItemTo" xml:space="preserve">
+    <value>Select folder to extract item to</value>
+  </data>
+  <data name="Dialog_SelectFolderToExtractChunkTo" xml:space="preserve">
+    <value>Select folder to extract chunk to</value>
+  </data>
+  <data name="Dialog_SelectRootFolderForExtraction" xml:space="preserve">
+    <value>Select root folder for extraction</value>
+  </data>
+  <data name="Dialog_SelectFolderContainingMsndParts" xml:space="preserve">
+    <value>Select folder containing .sseq/.sbnk/.swar to import</value>
+  </data>
+  <data name="Dialog_SelectFolderContainingExtractedArchive" xml:space="preserve">
+    <value>Select folder containing an extracted archive to import</value>
+  </data>
+  <data name="Dialog_SelectFolderContainingExtractedEmbeddedArchive" xml:space="preserve">
+    <value>Select folder containing the extracted embedded archive</value>
+  </data>
+  <data name="Dialog_SelectBaseFolderForNestedExtract" xml:space="preserve">
+    <value>Select base folder for nested extract</value>
+  </data>
+  <data name="Dialog_SelectBaseFolderForNestedExtractFromNode" xml:space="preserve">
+    <value>Select base folder for nested extract from node</value>
+  </data>
+  <data name="Warning_NoFilesFoundToImport" xml:space="preserve">
+    <value>No files found to import.</value>
+  </data>
+  <data name="Warning_OpenArchiveFirst" xml:space="preserve">
+    <value>Open an archive first.</value>
+  </data>
+  <data name="Warning_OpenDsarcFirst" xml:space="preserve">
+    <value>Open a DSARC archive first.</value>
+  </data>
+  <data name="Warning_InvalidSelection" xml:space="preserve">
+    <value>Invalid selection.</value>
+  </data>
+  <data name="Warning_InvalidParent" xml:space="preserve">
+    <value>Invalid parent</value>
+  </data>
+  <data name="Warning_InvalidChunk" xml:space="preserve">
+    <value>Invalid chunk</value>
+  </data>
+  <data name="Warning_SelectionNotEmbeddedArchive" xml:space="preserve">
+    <value>Selection is not an embedded archive.</value>
+  </data>
+  <data name="Warning_NestedImportDsarcOnly" xml:space="preserve">
+    <value>Nested import is for DSARC root only.</value>
+  </data>
+  <data name="Warning_ReplacementMustBeSseqSbnkSwar" xml:space="preserve">
+    <value>Replacement file must be .sseq, .sbnk, or .swar</value>
+  </data>
+  <data name="Error_FailedToRebuildRootArchive" xml:space="preserve">
+    <value>Failed to rebuild root archive.</value>
+  </data>
+  <data name="Error_FailedToRebuildArchive" xml:space="preserve">
+    <value>Failed to rebuild archive.</value>
+  </data>
+  <data name="Error_FileExistsCannotCreateFolder" xml:space="preserve">
+    <value>A file named '{0}' already exists in the selected folder; cannot create folder.</value>
+  </data>
 </root>

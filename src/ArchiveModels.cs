@@ -4,23 +4,22 @@ using System.Collections.ObjectModel;
 using System.IO;
 using System.Linq;
 using System.Text;
-namespace Manager
+namespace DisgaeaDS_Manager
 {
-    public enum ArchiveType
+    internal enum ArchiveType
     {
         DSARC,
         MSND
     }
-    public class ImportResult
+    internal class ImportResult
     {
         public ArchiveType FileType { get; set; }
         public Collection<Entry> Entries { get; } = [];
         public required string SourceFolder { get; set; }
     }
-    public static class Helpers
+    internal static class Helpers
     {
         public const int NAMESZ = 40;
-
         public static byte[] PadName(string n)
         {
             byte[] bytes = Encoding.UTF8.GetBytes(n ?? string.Empty);
@@ -32,11 +31,7 @@ namespace Manager
         }
         public static string GuessExtByMagic(byte[] data, string defaultExt)
         {
-            if (data is null)
-            {
-                throw new ArgumentNullException(nameof(data));
-            }
-
+            ArgumentNullException.ThrowIfNull(data);
             if (data.Length >= 4)
             {
                 if (data[0] == 0x53 && data[1] == 0x57 && data[2] == 0x41 && data[3] == 0x56)
@@ -51,7 +46,7 @@ namespace Manager
             return defaultExt;
         }
     }
-    public class Entry
+    internal class Entry
     {
         public FileInfo Path { get; set; }
         public int Size { get; set; }
@@ -66,7 +61,7 @@ namespace Manager
             IsMsnd = isMsnd;
         }
     }
-    public class TupleComparer : IEqualityComparer<Tuple<string, string>>
+    internal class TupleComparer : IEqualityComparer<Tuple<string, string>>
     {
         public bool Equals(Tuple<string, string> x, Tuple<string, string> y)
         {
@@ -79,17 +74,13 @@ namespace Manager
         }
         public int GetHashCode(Tuple<string, string> obj)
         {
-            if (obj is null)
-            {
-                throw new ArgumentNullException(nameof(obj));
-            }
-
+            ArgumentNullException.ThrowIfNull(obj);
             int h1 = StringComparer.Ordinal.GetHashCode(obj.Item1 ?? string.Empty);
             int h2 = StringComparer.Ordinal.GetHashCode(obj.Item2 ?? string.Empty);
             return h1 ^ h2;
         }
     }
-    public static class Detector
+    internal static class Detector
     {
         private static readonly byte[] MAGICDSARC =
         {
@@ -113,7 +104,7 @@ namespace Manager
                 : throw new InvalidDataException("Unknown archive format (magic mismatch).");
         }
     }
-    public static class Msnd
+    internal static class Msnd
     {
         public const int HDRMSND = 48;
         public static readonly string[] MSNDORDER =
@@ -128,21 +119,15 @@ namespace Manager
         };
         public static Collection<Entry> Parse(byte[] buf, string baseName)
         {
-            if (buf is null)
-            {
-                throw new ArgumentNullException(nameof(buf));
-            }
-
+            ArgumentNullException.ThrowIfNull(buf);
             if (!buf.Take(4).SequenceEqual(MAGICMSND))
             {
                 throw new InvalidDataException("Not an MSND archive.");
             }
-
             if (buf.Length < HDRMSND)
             {
                 throw new InvalidDataException("MSND too small.");
             }
-
             int sseqOff = BitConverter.ToInt32(buf, 16) - 16;
             int sbnkOff = BitConverter.ToInt32(buf, 20);
             int swarOff = BitConverter.ToInt32(buf, 24);
@@ -172,11 +157,7 @@ namespace Manager
         }
         public static byte[] Build(Dictionary<string, byte[]> chunks, byte[]? txtBytes = null)
         {
-            if (chunks is null)
-            {
-                throw new ArgumentNullException(nameof(chunks));
-            }
-
+            ArgumentNullException.ThrowIfNull(chunks);
             foreach (string ext in MSNDORDER)
             {
                 if (!chunks.ContainsKey(ext))
@@ -202,7 +183,6 @@ namespace Manager
                 {
                     throw new ArgumentException("txt must be 4 bytes", nameof(txtBytes));
                 }
-
                 Array.Copy(txtBytes, 0, hdr, 44, 4);
             }
             using MemoryStream ms = new();
@@ -215,21 +195,9 @@ namespace Manager
         }
         public static byte[] ReplaceChunk(byte[] msndBuf, string ext, byte[] newData)
         {
-            if (msndBuf is null)
-            {
-                throw new ArgumentNullException(nameof(msndBuf));
-            }
-
-            if (ext is null)
-            {
-                throw new ArgumentNullException(nameof(ext));
-            }
-
-            if (newData is null)
-            {
-                throw new ArgumentNullException(nameof(newData));
-            }
-
+            ArgumentNullException.ThrowIfNull(msndBuf);
+            ArgumentNullException.ThrowIfNull(ext);
+            ArgumentNullException.ThrowIfNull(newData);
             Collection<Entry> entries = Parse(msndBuf, "temp");
             Dictionary<string, Entry> map = new(StringComparer.OrdinalIgnoreCase)
             {
@@ -263,7 +231,7 @@ namespace Manager
             }, txt);
         }
     }
-    public static class Dsarc
+    internal static class Dsarc
     {
         public const int HDRDSARC = 16;
         public const int ENTRYINFOSZ = 8;
@@ -272,6 +240,8 @@ namespace Manager
             0x44, 0x53, 0x41, 0x52, 0x43, 0x20, 0x46, 0x4C
         };
         public const int VERSION = 1;
+        private static readonly char[] separator = new[] { '=' };
+
         public static Collection<Entry> Parse(string path)
         {
             using FileStream fs = new(path, FileMode.Open, FileAccess.Read);
@@ -296,26 +266,22 @@ namespace Manager
                 {
                     throw new InvalidDataException("Corrupted entry name");
                 }
-
                 string name = Encoding.UTF8.GetString(raw).Split('\0')[0].Trim();
                 if (string.IsNullOrEmpty(name))
                 {
                     name = $"file_{i}";
                 }
-
                 byte[] info = br.ReadBytes(ENTRYINFOSZ);
                 if (info.Length < ENTRYINFOSZ)
                 {
                     throw new InvalidDataException("Corrupted entry info");
                 }
-
                 int size = BitConverter.ToInt32(info, 0);
                 int offset = BitConverter.ToInt32(info, 4);
                 if (offset + (long)size > archiveSize)
                 {
                     throw new InvalidDataException($"{name} exceeds bounds");
                 }
-
                 entriesMeta.Add(Tuple.Create(name, size, offset));
             }
             Collection<Entry> outList = [];
@@ -340,11 +306,7 @@ namespace Manager
         }
         public static Collection<Entry> ParseFromBuffer(byte[] buf)
         {
-            if (buf is null)
-            {
-                throw new ArgumentNullException(nameof(buf));
-            }
-
+            ArgumentNullException.ThrowIfNull(buf);
             using MemoryStream ms = new(buf);
             using BinaryReader br = new(ms, Encoding.UTF8, true);
             if (!br.ReadBytes(8).SequenceEqual(MAGICDSARC))
@@ -366,26 +328,22 @@ namespace Manager
                 {
                     throw new InvalidDataException("Corrupted entry name");
                 }
-
                 string name = Encoding.UTF8.GetString(raw).Split('\0')[0].Trim();
                 if (string.IsNullOrEmpty(name))
                 {
                     name = $"file_{i}";
                 }
-
                 byte[] info = br.ReadBytes(ENTRYINFOSZ);
                 if (info.Length < ENTRYINFOSZ)
                 {
                     throw new InvalidDataException("Corrupted entry info");
                 }
-
                 int size = BitConverter.ToInt32(info, 0);
                 int offset = BitConverter.ToInt32(info, 4);
                 if (offset + (long)size > buf.Length)
                 {
                     throw new InvalidDataException($"{name} exceeds bounds in buffer");
                 }
-
                 entriesMeta.Add(Tuple.Create(name, size, offset));
             }
             Collection<Entry> outList = [];
@@ -410,16 +368,8 @@ namespace Manager
         }
         public static byte[] Build(Collection<Entry> entries, string srcDir, string? mappingPath = null)
         {
-            if (entries is null)
-            {
-                throw new ArgumentNullException(nameof(entries));
-            }
-
-            if (srcDir is null)
-            {
-                throw new ArgumentNullException(nameof(srcDir));
-            }
-
+            ArgumentNullException.ThrowIfNull(entries);
+            ArgumentNullException.ThrowIfNull(srcDir);
             Collection<Tuple<string, byte[]>> pairs = [];
             if (!string.IsNullOrEmpty(mappingPath) && File.Exists(mappingPath))
             {
@@ -429,8 +379,7 @@ namespace Manager
                     {
                         continue;
                     }
-
-                    string[] parts = ln.Split(new[] { '=' }, 2);
+                    string[] parts = ln.Split(separator, 2);
                     string left = parts[0].Trim();
                     string right = parts[1].Trim();
                     string sourceFile = Path.Combine(srcDir, right);
@@ -438,7 +387,6 @@ namespace Manager
                     {
                         throw new FileNotFoundException($"File missing: {right}");
                     }
-
                     pairs.Add(Tuple.Create(left, File.ReadAllBytes(sourceFile)));
                 }
             }
@@ -451,7 +399,6 @@ namespace Manager
                     {
                         throw new FileNotFoundException($"Missing source file: {sourceFile}");
                     }
-
                     pairs.Add(Tuple.Create(e.Path.ToString(), File.ReadAllBytes(sourceFile)));
                 }
             }
@@ -459,11 +406,7 @@ namespace Manager
         }
         public static byte[] BuildFromPairs(Collection<Tuple<string, byte[]>> pairs)
         {
-            if (pairs is null)
-            {
-                throw new ArgumentNullException(nameof(pairs));
-            }
-
+            ArgumentNullException.ThrowIfNull(pairs);
             int count = pairs.Count;
             using MemoryStream ms = new();
             using BinaryWriter bw = new(ms, Encoding.UTF8, true);
