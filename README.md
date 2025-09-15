@@ -1,4 +1,4 @@
-# DSARC-MSND-Manager
+# DisgaeaDS-Manager
 
 An editor for **DSARC** and **MSND** archives by *Nippon Ichi Software*, built with **C# (.NET 9.0)**.
 
