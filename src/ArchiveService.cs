@@ -106,6 +106,12 @@ namespace Disgaea_DS_Manager
                             if (Directory.Exists(candidate))
                             {
                                 byte[] childBuf = RebuildNestedFromFolderAsync(candidate, ct).GetAwaiter().GetResult();
+                                if (childBuf == null)
+                                {
+                                    missing.Add(right);
+                                    progress?.Report((i + 1, total));
+                                    continue;
+                                }
                                 pairs.Add(Tuple.Create(left, childBuf));
                                 progress?.Report((i + 1, total));
                                 continue;
@@ -144,7 +150,7 @@ namespace Disgaea_DS_Manager
                             if (Directory.Exists(candidate))
                             {
                                 byte[] childBuf = RebuildNestedFromFolderAsync(candidate, ct).GetAwaiter().GetResult();
-                                if (childBuf == null || childBuf.Length == 0)
+                                if (childBuf == null)
                                     throw new InvalidOperationException($"Failed to rebuild nested archive at {candidate}");
                                 pairs.Add(Tuple.Create(e.Path.ToString(), childBuf));
                                 progress?.Report((i + 1, total));

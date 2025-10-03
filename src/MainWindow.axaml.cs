@@ -55,8 +55,10 @@ namespace Disgaea_DS_Manager
 
             if (tree != null)
             {
+                tree.SelectionChanged += TreeView_SelectionChanged;
                 tree.AddHandler(InputElement.PointerReleasedEvent, TreeView_PointerReleased, RoutingStrategies.Tunnel);
             }
+
         }
 
         #region UI helpers
@@ -153,9 +155,17 @@ namespace Disgaea_DS_Manager
             {
                 var pb = this.FindControl<ProgressBar>("ProgressBar");
                 if (pb == null) return;
-                int t = Math.Max(1, total);
-                pb.Maximum = t;
-                pb.Value = Math.Min(Math.Max(0, val), t);
+                
+                try
+                {
+                    int t = Math.Max(1, total);
+                    pb.Maximum = t;
+                    pb.Value = Math.Min(Math.Max(0, val), t);
+                }
+                catch (ArgumentOutOfRangeException)
+                {
+                    // Ignore progress bar range errors
+                }
             });
         }
 
@@ -172,9 +182,9 @@ namespace Disgaea_DS_Manager
 
         #region Archive operations (port of your logic)
 
-        private void NewArchive()
+        private async void NewArchive()
         {
-            _ = Dispatcher.UIThread.InvokeAsync(async () =>
+            try
             {
                 string? file = await SelectSaveFileAsync().ConfigureAwait(false);
                 if (string.IsNullOrEmpty(file)) return;
@@ -184,16 +194,23 @@ namespace Disgaea_DS_Manager
                 filetype = archivePath.EndsWith(".msnd", StringComparison.OrdinalIgnoreCase) ? ArchiveType.MSND : ArchiveType.DSARC;
                 archiveOpenedFromDisk = false;
                 RefreshTree();
-            });
+                SetStatus("New archive created");
+                AppendLog($"Created new {filetype} archive: {Path.GetFileName(archivePath)}");
+            }
+            catch (Exception ex)
+            {
+                await ShowErrorAsync($"Failed to create new archive: {ex.Message}");
+            }
         }
 
         private async Task OpenArchiveAsync(IArchiveService archiveService)
         {
-            string? file = await SelectFileAsync().ConfigureAwait(false);
-            if (file == null) return;
-            archivePath = file;
             try
             {
+                string? file = await SelectFileAsync().ConfigureAwait(false);
+                if (file == null) return;
+                archivePath = file;
+                
                 _cts?.Cancel();
                 _cts = new CancellationTokenSource();
                 CancellationToken ct = _cts.Token;
@@ -201,6 +218,7 @@ namespace Disgaea_DS_Manager
                 filetype = Detector.FromFile(archivePath);
                 archiveOpenedFromDisk = true;
                 RefreshTree();
+                SetStatus($"Opened {Path.GetFileName(archivePath)}");
                 AppendLog($"Opened {Path.GetFileName(archivePath)} as {filetype.ToString().ToUpper(CultureInfo.InvariantCulture)}");
             }
             catch (OperationCanceledException)
@@ -209,11 +227,15 @@ namespace Disgaea_DS_Manager
             }
             catch (IOException io)
             {
-                await ShowErrorAsync(io.Message);
+                await ShowErrorAsync($"Failed to open archive: {io.Message}");
             }
             catch (UnauthorizedAccessException ua)
             {
-                await ShowErrorAsync(ua.Message);
+                await ShowErrorAsync($"Access denied: {ua.Message}");
+            }
+            catch (Exception ex)
+            {
+                await ShowErrorAsync($"Failed to open archive: {ex.Message}");
             }
             finally
             {
@@ -223,23 +245,24 @@ namespace Disgaea_DS_Manager
 
         private async Task SaveArchiveAsync()
         {
-            if (archivePath == null)
-            {
-                await SaveAsAsync().ConfigureAwait(false);
-                return;
-            }
-            if (entries?.Count == 0)
-            {
-                await ShowWarningAsync("No files in archive to save.");
-                return;
-            }
-            if (srcFolder == null)
-            {
-                await ShowWarningAsync(archiveOpenedFromDisk ? "No files in archive to save." : "Import a folder via root context menu first.");
-                return;
-            }
             try
             {
+                if (archivePath == null)
+                {
+                    await SaveAsAsync().ConfigureAwait(false);
+                    return;
+                }
+                if (entries?.Count == 0)
+                {
+                    await ShowWarningAsync("No files in archive to save.");
+                    return;
+                }
+                if (srcFolder == null)
+                {
+                    await ShowWarningAsync(archiveOpenedFromDisk ? "No files in archive to save." : "Import a folder via root context menu first.");
+                    return;
+                }
+                
                 _cts?.Cancel();
                 _cts = new CancellationTokenSource();
                 CancellationToken ct = _cts.Token;
@@ -254,11 +277,15 @@ namespace Disgaea_DS_Manager
             }
             catch (IOException io)
             {
-                await ShowErrorAsync(io.Message);
+                await ShowErrorAsync($"Failed to save archive: {io.Message}");
             }
             catch (UnauthorizedAccessException ua)
             {
-                await ShowErrorAsync(ua.Message);
+                await ShowErrorAsync($"Access denied: {ua.Message}");
+            }
+            catch (Exception ex)
+            {
+                await ShowErrorAsync($"Failed to save archive: {ex.Message}");
             }
             finally
             {
@@ -316,15 +343,15 @@ namespace Disgaea_DS_Manager
                     }
                 }
 
-                // set items via ItemsSourceProperty (Items is read-only)
-                tree.SetValue(ItemsControl.ItemsSourceProperty, items);
+                // Always add the root item first
+                var allItems = new AvaloniaList<TreeViewItem> { rootItem };
+                allItems.AddRange(items);
 
-                // ensure root is first item if nothing else
-                if (items.Count == 0)
-                {
-                    var onlyRootList = new AvaloniaList<TreeViewItem> { rootItem };
-                    tree.SetValue(ItemsControl.ItemsSourceProperty, onlyRootList);
-                }
+                // set items via ItemsSourceProperty (Items is read-only)
+                tree.SetValue(ItemsControl.ItemsSourceProperty, allItems);
+
+                // Update context menu visibility for current selection
+                UpdateContextMenuVisibility(tree.SelectedItem);
             });
         }
 
@@ -333,27 +360,34 @@ namespace Disgaea_DS_Manager
 
         #region Tree & Context menu
 
-        private void TreeView_PointerReleased(object? sender, PointerReleasedEventArgs e)
+        private void TreeView_SelectionChanged(object? sender, SelectionChangedEventArgs e)
         {
-            if (e.InitialPressMouseButton != MouseButton.Right) return;
             var tree = this.FindControl<TreeView>("TreeView");
             if (tree == null) return;
 
-            var sel = tree.SelectedItem;
-            TreeViewItem? node = null;
-            if (sel is TreeViewItem tvi) node = tvi;
-            else
-            {
-                node = tree.GetVisualDescendants().OfType<TreeViewItem>().FirstOrDefault(x =>
-                    (x.DataContext != null && x.DataContext.Equals(sel)) ||
-                    (x.Header != null && x.Header.Equals(sel)));
-            }
+            var selectedItem = tree.SelectedItem;
+            UpdateContextMenuVisibility(selectedItem);
+        }
 
-            if (node != null)
+        private void TreeView_PointerReleased(object? sender, PointerReleasedEventArgs e)
+        {
+            if (e.InitialPressMouseButton != MouseButton.Right) return;
+            
+            var tree = this.FindControl<TreeView>("TreeView");
+            if (tree == null) return;
+
+            var selectedItem = tree.SelectedItem;
+            if (selectedItem is TreeViewItem treeViewItem)
             {
-                ShowContextMenu(node);
+                ShowContextMenu(treeViewItem);
                 e.Handled = true;
             }
+        }
+
+        private void UpdateContextMenuVisibility(object? selectedItem)
+        {
+            // This method is no longer needed with dynamic context menu creation
+            // The context menu items are created dynamically in ShowContextMenu method
         }
 
         private void ShowContextMenu(TreeViewItem node)
@@ -387,15 +421,15 @@ namespace Disgaea_DS_Manager
                 if (nodeHasChildren && nodeEntry != null && nodeEntry.IsMsnd)
                 {
                     var mi = new MenuItem { Header = "Import Folder" };
-                    mi.Click += async (_, __) => await ImportFolderToNodeAsync(node).ConfigureAwait(false);
+                    mi.Click += async (_, __) => await ImportFolderToNodeAsync().ConfigureAwait(false);
                     items.Add(mi);
 
                     var mi2 = new MenuItem { Header = "Extract All" };
-                    mi2.Click += async (_, __) => await ExtractAllFromNodeAsync(node).ConfigureAwait(false);
+                    mi2.Click += async (_, __) => await ExtractAllFromNodeAsync().ConfigureAwait(false);
                     items.Add(mi2);
 
                     var mi3 = new MenuItem { Header = "Extract All Nested" };
-                    mi3.Click += async (_, __) => await ExtractAllNestedFromNodeAsync(node).ConfigureAwait(false);
+                    mi3.Click += async (_, __) => await ExtractAllNestedFromNodeAsync().ConfigureAwait(false);
                     items.Add(mi3);
                 }
 
@@ -404,29 +438,29 @@ namespace Disgaea_DS_Manager
                     if (node.Parent == rootItem)
                     {
                         var mi = new MenuItem { Header = "Extract" };
-                        mi.Click += async (_, __) => await ExtractItemAsync(node).ConfigureAwait(false);
+                        mi.Click += async (_, __) => await ExtractItemAsync().ConfigureAwait(false);
                         items.Add(mi);
                         var rep = new MenuItem { Header = "Replace" };
-                        rep.Click += async (_, __) => await ReplaceItemAsync(node).ConfigureAwait(false);
+                        rep.Click += async (_, __) => await ReplaceItemAsync().ConfigureAwait(false);
                         items.Add(rep);
                     }
                     else if (node.Parent != null)
                     {
                         var mi = new MenuItem { Header = "Extract (chunk)" };
-                        mi.Click += async (_, __) => await ExtractChunkItemAsync(node, (TreeViewItem)node.Parent).ConfigureAwait(false);
+                        mi.Click += async (_, __) => await ExtractChunkItemAsync().ConfigureAwait(false);
                         items.Add(mi);
                         var rep = new MenuItem { Header = "Replace (chunk)" };
-                        rep.Click += async (_, __) => await ReplaceChunkItemAsync(node, (TreeViewItem)node.Parent).ConfigureAwait(false);
+                        rep.Click += async (_, __) => await ReplaceChunkItemAsync().ConfigureAwait(false);
                         items.Add(rep);
                     }
                 }
                 else if (filetype == ArchiveType.MSND)
                 {
                     var mi = new MenuItem { Header = "Extract" };
-                    mi.Click += async (_, __) => await ExtractItemAsync(node).ConfigureAwait(false);
+                    mi.Click += async (_, __) => await ExtractItemAsync().ConfigureAwait(false);
                     items.Add(mi);
                     var rep = new MenuItem { Header = "Replace" };
-                    rep.Click += async (_, __) => await ReplaceItemAsync(node).ConfigureAwait(false);
+                    rep.Click += async (_, __) => await ReplaceItemAsync().ConfigureAwait(false);
                     items.Add(rep);
                 }
             }
@@ -521,8 +555,11 @@ namespace Disgaea_DS_Manager
             }
         }
 
-        private async Task ExtractItemAsync(TreeViewItem node)
+        private async Task ExtractItemAsync()
         {
+            var tree = this.FindControl<TreeView>("TreeView");
+            if (tree?.SelectedItem is not TreeViewItem node) { await ShowWarningAsync("Invalid selection"); return; }
+
             if (rootItem == null) { await ShowWarningAsync("Invalid selection"); return; }
 
             int idx = -1;
@@ -563,8 +600,11 @@ namespace Disgaea_DS_Manager
             }
         }
 
-        private async Task ReplaceItemAsync(TreeViewItem node)
+        private async Task ReplaceItemAsync()
         {
+            var tree = this.FindControl<TreeView>("TreeView");
+            if (tree?.SelectedItem is not TreeViewItem node) { await ShowWarningAsync("Invalid selection"); return; }
+
             if (rootItem == null) { await ShowWarningAsync("Invalid selection"); return; }
 
             int idx = -1;
@@ -601,9 +641,13 @@ namespace Disgaea_DS_Manager
             }
         }
 
-        private async Task ExtractChunkItemAsync(TreeViewItem node, TreeViewItem parent)
+        private async Task ExtractChunkItemAsync()
         {
-            if (parent.DataContext is not Entry parentEntry) { await ShowWarningAsync("Invalid parent"); return; }
+            var tree = this.FindControl<TreeView>("TreeView");
+            if (tree?.SelectedItem is not TreeViewItem node) { await ShowWarningAsync("Invalid selection"); return; }
+
+            var parent = node.Parent as TreeViewItem;
+            if (parent?.DataContext is not Entry parentEntry) { await ShowWarningAsync("Invalid parent"); return; }
             if (node.DataContext is not Entry chunkEntry) { await ShowWarningAsync("Invalid chunk"); return; }
             string? dest = await SelectFolderAsync("Select folder to extract chunk to").ConfigureAwait(false);
             if (dest == null) return;
@@ -638,9 +682,13 @@ namespace Disgaea_DS_Manager
         private Task _archive_service_ExtractChunkAsync(string archivePath, Entry parentEntry, Entry chunkEntry, string dest, CancellationToken ct)
             => _archiveService.ExtractChunkItemAsync(archivePath, parentEntry, chunkEntry, dest, ct);
 
-        private async Task<byte[]> ReplaceChunkItemAsync(TreeViewItem node, TreeViewItem parent)
+        private async Task<byte[]> ReplaceChunkItemAsync()
         {
-            if (parent.DataContext is not Entry parentEntry) { await ShowWarningAsync("Invalid parent"); return Array.Empty<byte>(); }
+            var tree = this.FindControl<TreeView>("TreeView");
+            if (tree?.SelectedItem is not TreeViewItem node) { await ShowWarningAsync("Invalid selection"); return Array.Empty<byte>(); }
+
+            var parent = node.Parent as TreeViewItem;
+            if (parent?.DataContext is not Entry parentEntry) { await ShowWarningAsync("Invalid parent"); return Array.Empty<byte>(); }
             if (node.DataContext is not Entry chunkEntry) { await ShowWarningAsync("Invalid chunk"); return Array.Empty<byte>(); }
 
             string? replacement = await SelectFileAsync().ConfigureAwait(false);
@@ -680,8 +728,11 @@ namespace Disgaea_DS_Manager
             }
         }
 
-        private async Task ExtractAllFromNodeAsync(TreeViewItem node)
+        private async Task ExtractAllFromNodeAsync()
         {
+            var tree = this.FindControl<TreeView>("TreeView");
+            if (tree?.SelectedItem is not TreeViewItem node) { await ShowWarningAsync("Invalid selection"); return; }
+
             if (node.DataContext is not Entry entry || !entry.IsMsnd)
             {
                 await ShowWarningAsync("Selection is not an embedded archive");
@@ -731,8 +782,11 @@ namespace Disgaea_DS_Manager
             }
         }
 
-        private async Task ImportFolderToNodeAsync(TreeViewItem node)
+        private async Task ImportFolderToNodeAsync()
         {
+            var tree = this.FindControl<TreeView>("TreeView");
+            if (tree?.SelectedItem is not TreeViewItem node) { await ShowWarningAsync("Invalid selection"); return; }
+
             if (node.DataContext is not Entry entry || !entry.IsMsnd)
             {
                 await ShowWarningAsync("Selection not an embedded archive");
@@ -838,8 +892,11 @@ namespace Disgaea_DS_Manager
             }
         }
 
-        private async Task ExtractAllNestedFromNodeAsync(TreeViewItem node)
+        private async Task ExtractAllNestedFromNodeAsync()
         {
+            var tree = this.FindControl<TreeView>("TreeView");
+            if (tree?.SelectedItem is not TreeViewItem node) { await ShowWarningAsync("Invalid selection"); return; }
+
             if (node.DataContext is not Entry entry)
             {
                 await ShowWarningAsync("Invalid selection");

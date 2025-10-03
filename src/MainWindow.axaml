@@ -30,8 +30,8 @@
 				<RowDefinition Height="300" />
 			</Grid.RowDefinitions>
 
-			<!-- Tree view -->
-			<TreeView x:Name="TreeView" Grid.Row="0" Margin="6" HorizontalAlignment="Stretch" VerticalAlignment="Stretch" />
+		<!-- Tree view -->
+		<TreeView x:Name="TreeView" Grid.Row="0" Margin="6" HorizontalAlignment="Stretch" VerticalAlignment="Stretch" />
 
 			<!-- Log -->
 			<TextBox x:Name="LogTextBox"
