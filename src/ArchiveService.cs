@@ -15,7 +15,8 @@ namespace Disgaea_DS_Manager
     public interface IArchiveService
     {
         Task<Collection<Entry>> LoadArchiveAsync(string archivePath, CancellationToken ct = default);
-        Task SaveArchiveAsync(string path, ArchiveType type, IList<Entry> entries, string srcFolder, IProgress<(int current, int total)>? progress, CancellationToken ct);
+        Task SaveArchiveAsync(string path, ArchiveType type, IList<Entry> entries, string srcFolder,
+        IProgress<(int current, int total)>? progress, CancellationToken ct, string? originalArchivePath = null);
         Task<ImportResult> InspectFolderForImportAsync(string folder, CancellationToken ct = default);
         Task<(string outBase, List<string> mapperLines)> ExtractAllAsync(string archivePath, ArchiveType filetype, string destFolder, IProgress<(int current, int total)>? progress = null, CancellationToken ct = default);
         Task ExtractItemAsync(string archivePath, ArchiveType filetype, Entry entry, string destFolder, CancellationToken ct = default);
@@ -39,6 +40,11 @@ namespace Disgaea_DS_Manager
         private static readonly char[] separatorArray = new[] { '=' };
         private static readonly string[] sourceArray = new[] { ".sseq", ".sbnk", ".swar" };
 
+        private void AppendLog(string msg)
+        {
+            // Simple logging - you can enhance this as needed
+            System.Diagnostics.Debug.WriteLine($"[ArchiveService] {msg}");
+        }
         public async Task<Collection<Entry>> LoadArchiveAsync(string archivePath, CancellationToken ct = default)
         {
             return await Task.Run(() =>
@@ -50,7 +56,8 @@ namespace Disgaea_DS_Manager
             }, ct).ConfigureAwait(false);
         }
 
-        public async Task SaveArchiveAsync(string path, ArchiveType type, IList<Entry> entries, string srcFolder, IProgress<(int current, int total)>? progress, CancellationToken ct)
+        public async Task SaveArchiveAsync(string path, ArchiveType type, IList<Entry> entries, string srcFolder,
+    IProgress<(int current, int total)>? progress, CancellationToken ct, string? originalArchivePath = null)
         {
             if (string.IsNullOrEmpty(path))
                 throw new ArgumentNullException(nameof(path));
@@ -62,10 +69,10 @@ namespace Disgaea_DS_Manager
                 ct.ThrowIfCancellationRequested();
                 if (type == ArchiveType.MSND)
                 {
+                    // MSND saving logic remains the same...
                     var chunks = new Dictionary<string, byte[]>(StringComparer.OrdinalIgnoreCase);
                     int total = Msnd.MSNDORDER.Length;
 
-                    // Build a lookup of existing files in the source folder by extension
                     var sourceFilesByExt = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
                     if (Directory.Exists(srcFolder))
                     {
@@ -84,14 +91,12 @@ namespace Disgaea_DS_Manager
                         ct.ThrowIfCancellationRequested();
                         string ext = Msnd.MSNDORDER[i];
 
-                        // First try to find the file using the entry's path
                         string? sourcePath = null;
                         var entryForExt = entries.FirstOrDefault(e =>
                             string.Equals(Path.GetExtension(e.Path.Name), ext, StringComparison.OrdinalIgnoreCase));
 
                         if (entryForExt != null)
                         {
-                            // Try the exact path from the entry
                             string candidate = Path.Combine(srcFolder, entryForExt.Path.Name);
                             if (File.Exists(candidate))
                             {
@@ -99,7 +104,6 @@ namespace Disgaea_DS_Manager
                             }
                             else
                             {
-                                // If exact path doesn't exist, search for any file with the same extension
                                 string[] matches = Directory.GetFiles(srcFolder, $"*{ext}", SearchOption.AllDirectories);
                                 if (matches.Length > 0)
                                 {
@@ -108,7 +112,6 @@ namespace Disgaea_DS_Manager
                             }
                         }
 
-                        // If still not found, use the pre-built lookup
                         if (sourcePath == null && sourceFilesByExt.ContainsKey(ext))
                         {
                             sourcePath = sourceFilesByExt[ext];
@@ -119,7 +122,6 @@ namespace Disgaea_DS_Manager
                             throw new FileNotFoundException($"Missing {ext} file. Searched in: {srcFolder}");
                         }
 
-                        // Fix file locking here
                         using (FileStream fs = new FileStream(sourcePath, FileMode.Open, FileAccess.Read, FileShare.Read))
                         {
                             byte[] buffer = new byte[fs.Length];
@@ -132,7 +134,7 @@ namespace Disgaea_DS_Manager
                 }
                 else
                 {
-                    // DSARC saving logic remains the same but with file locking fixes
+                    // DSARC saving with hybrid approach
                     string mappingPath = Path.Combine(srcFolder, "mapper.txt");
                     if (File.Exists(mappingPath))
                     {
@@ -140,6 +142,18 @@ namespace Disgaea_DS_Manager
                         var pairs = new Collection<Tuple<string, byte[]>>();
                         string[] lines = File.ReadAllLines(mappingPath, Encoding.UTF8);
                         int total = lines.Length;
+
+                        // Create lookup for source files
+                        var sourceFiles = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+                        if (Directory.Exists(srcFolder))
+                        {
+                            foreach (string file in Directory.GetFiles(srcFolder, "*.*", SearchOption.AllDirectories))
+                            {
+                                string fileName = Path.GetFileName(file);
+                                sourceFiles[fileName] = file;
+                            }
+                        }
+
                         for (int i = 0; i < lines.Length; i++)
                         {
                             ct.ThrowIfCancellationRequested();
@@ -152,8 +166,24 @@ namespace Disgaea_DS_Manager
                             string[] parts = ln.Split(separator, 2);
                             string left = parts[0].Trim();
                             string right = parts[1].Trim();
-                            string candidate = Path.Combine(srcFolder, right);
 
+                            // Check if this file exists in source folder (modified file)
+                            string fileName = Path.GetFileName(right);
+                            if (sourceFiles.ContainsKey(fileName))
+                            {
+                                string sourceFile = sourceFiles[fileName];
+                                using (FileStream fs = new FileStream(sourceFile, FileMode.Open, FileAccess.Read, FileShare.Read))
+                                {
+                                    byte[] fileData = new byte[fs.Length];
+                                    fs.Read(fileData, 0, fileData.Length);
+                                    pairs.Add(Tuple.Create(left, fileData));
+                                }
+                                progress?.Report((i + 1, total));
+                                continue;
+                            }
+
+                            // Check for directory (nested archive)
+                            string candidate = Path.Combine(srcFolder, right);
                             if (Directory.Exists(candidate))
                             {
                                 byte[] childBuf = RebuildNestedFromFolderAsync(candidate, ct).GetAwaiter().GetResult();
@@ -168,23 +198,40 @@ namespace Disgaea_DS_Manager
                                 continue;
                             }
 
-                            if (File.Exists(candidate))
+                            // If we have original archive path, try to read from original archive
+                            if (!string.IsNullOrEmpty(originalArchivePath) && File.Exists(originalArchivePath))
                             {
-                                // Fix file locking in DSARC file reading
-                                using (FileStream fs = new FileStream(candidate, FileMode.Open, FileAccess.Read, FileShare.Read))
+                                try
                                 {
-                                    byte[] fileData = new byte[fs.Length];
-                                    fs.Read(fileData, 0, fileData.Length);
-                                    pairs.Add(Tuple.Create(left, fileData));
+                                    // Find the original entry to get its offset and size
+                                    var originalEntry = entries.FirstOrDefault(e =>
+                                        string.Equals(e.Path.Name, left, StringComparison.OrdinalIgnoreCase));
+                                    if (originalEntry != null && originalEntry.Offset > 0 && originalEntry.Size > 0)
+                                    {
+                                        using (FileStream fs = new FileStream(originalArchivePath, FileMode.Open, FileAccess.Read, FileShare.Read))
+                                        {
+                                            fs.Seek(originalEntry.Offset, SeekOrigin.Begin);
+                                            byte[] fileData = new byte[originalEntry.Size];
+                                            int read = fs.Read(fileData, 0, originalEntry.Size);
+                                            if (read == originalEntry.Size)
+                                            {
+                                                pairs.Add(Tuple.Create(left, fileData));
+                                                progress?.Report((i + 1, total));
+                                                continue;
+                                            }
+                                        }
+                                    }
                                 }
-                                progress?.Report((i + 1, total));
-                                continue;
+                                catch (Exception ex)
+                                {
+                                    AppendLog($"Failed to read original entry {left}: {ex.Message}");
+                                }
                             }
 
+                            // Search for file by name in source folder
                             string[] matches = Directory.GetFiles(srcFolder, Path.GetFileName(right), SearchOption.AllDirectories);
                             if (matches.Length > 0)
                             {
-                                // Fix file locking in matched file reading
                                 using (FileStream fs = new FileStream(matches[0], FileMode.Open, FileAccess.Read, FileShare.Read))
                                 {
                                     byte[] fileData = new byte[fs.Length];
@@ -205,29 +252,32 @@ namespace Disgaea_DS_Manager
                     }
                     else
                     {
-                        // Similar fixes for the non-mapping path...
+                        // Non-mapper path with hybrid approach
                         var pairs = new Collection<Tuple<string, byte[]>>();
                         int total = entries.Count;
+
+                        // Create lookup for source files
+                        var sourceFiles = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+                        if (Directory.Exists(srcFolder))
+                        {
+                            foreach (string file in Directory.GetFiles(srcFolder, "*.*", SearchOption.AllDirectories))
+                            {
+                                string fileName = Path.GetFileName(file);
+                                sourceFiles[fileName] = file;
+                            }
+                        }
+
                         for (int i = 0; i < entries.Count; i++)
                         {
                             ct.ThrowIfCancellationRequested();
                             Entry e = entries[i];
-                            string candidate = Path.Combine(srcFolder, e.Path.ToString());
+                            string fileName = e.Path.Name;
 
-                            if (Directory.Exists(candidate))
+                            // Check if file exists in source folder (modified file)
+                            if (sourceFiles.ContainsKey(fileName))
                             {
-                                byte[] childBuf = RebuildNestedFromFolderAsync(candidate, ct).GetAwaiter().GetResult();
-                                if (childBuf == null)
-                                    throw new InvalidOperationException($"Failed to rebuild nested archive at {candidate}");
-                                pairs.Add(Tuple.Create(e.Path.ToString(), childBuf));
-                                progress?.Report((i + 1, total));
-                                continue;
-                            }
-
-                            if (File.Exists(candidate))
-                            {
-                                // Fix file locking
-                                using (FileStream fs = new FileStream(candidate, FileMode.Open, FileAccess.Read, FileShare.Read))
+                                string sourceFile = sourceFiles[fileName];
+                                using (FileStream fs = new FileStream(sourceFile, FileMode.Open, FileAccess.Read, FileShare.Read))
                                 {
                                     byte[] fileData = new byte[fs.Length];
                                     fs.Read(fileData, 0, fileData.Length);
@@ -237,10 +287,47 @@ namespace Disgaea_DS_Manager
                                 continue;
                             }
 
-                            string[] matches = Directory.GetFiles(srcFolder, Path.GetFileName(e.Path.ToString()), SearchOption.AllDirectories);
+                            // If we have original archive path, read from original archive
+                            if (!string.IsNullOrEmpty(originalArchivePath) && File.Exists(originalArchivePath) &&
+                                e.Offset > 0 && e.Size > 0)
+                            {
+                                try
+                                {
+                                    using (FileStream fs = new FileStream(originalArchivePath, FileMode.Open, FileAccess.Read, FileShare.Read))
+                                    {
+                                        fs.Seek(e.Offset, SeekOrigin.Begin);
+                                        byte[] fileData = new byte[e.Size];
+                                        int read = fs.Read(fileData, 0, e.Size);
+                                        if (read == e.Size)
+                                        {
+                                            pairs.Add(Tuple.Create(e.Path.ToString(), fileData));
+                                            progress?.Report((i + 1, total));
+                                            continue;
+                                        }
+                                    }
+                                }
+                                catch (Exception ex)
+                                {
+                                    AppendLog($"Failed to read original entry {fileName}: {ex.Message}");
+                                }
+                            }
+
+                            // Check for directory in source folder
+                            string candidateDir = Path.Combine(srcFolder, e.Path.ToString());
+                            if (Directory.Exists(candidateDir))
+                            {
+                                byte[] childBuf = RebuildNestedFromFolderAsync(candidateDir, ct).GetAwaiter().GetResult();
+                                if (childBuf == null)
+                                    throw new InvalidOperationException($"Failed to rebuild nested archive at {candidateDir}");
+                                pairs.Add(Tuple.Create(e.Path.ToString(), childBuf));
+                                progress?.Report((i + 1, total));
+                                continue;
+                            }
+
+                            // Search for file by name in source folder
+                            string[] matches = Directory.GetFiles(srcFolder, fileName, SearchOption.AllDirectories);
                             if (matches.Length > 0)
                             {
-                                // Fix file locking
                                 using (FileStream fs = new FileStream(matches[0], FileMode.Open, FileAccess.Read, FileShare.Read))
                                 {
                                     byte[] fileData = new byte[fs.Length];
@@ -250,7 +337,8 @@ namespace Disgaea_DS_Manager
                                 progress?.Report((i + 1, total));
                                 continue;
                             }
-                            throw new FileNotFoundException($"Missing source file or folder for entry: {e.Path} (expected at {candidate})");
+
+                            throw new FileNotFoundException($"Missing source file or folder for entry: {e.Path} (expected at {Path.Combine(srcFolder, e.Path.ToString())})");
                         }
                         File.WriteAllBytes(path, Dsarc.BuildFromPairs(pairs));
                         progress?.Report((1, 1));

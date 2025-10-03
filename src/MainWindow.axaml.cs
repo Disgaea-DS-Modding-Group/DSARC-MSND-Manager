@@ -330,8 +330,11 @@ namespace Disgaea_DS_Manager
                 CancellationToken ct = _cts.Token;
                 Progress<(int current, int total)> progress = new(t => UpdateProgress(t.current, t.total));
 
+                // Pass original archive path for hybrid saving
+                string? originalArchivePath = archiveOpenedFromDisk ? this.archivePath : null;
+
                 await _archiveService.SaveArchiveAsync(archivePath, filetype!.Value, entries.ToList(),
-                    srcFolder ?? string.Empty, progress, ct).ConfigureAwait(false);
+                    srcFolder ?? string.Empty, progress, ct, originalArchivePath).ConfigureAwait(false);
 
                 SetStatus(filetype == ArchiveType.MSND ? "MSND saved" : "DSARC saved");
                 AppendLog($"{filetype.ToString().ToUpper(CultureInfo.InvariantCulture)} saved.");
