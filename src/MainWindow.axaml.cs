@@ -100,37 +100,59 @@ namespace Disgaea_DS_Manager
             return null;
         }
 
+        // In MainWindow.axaml.cs - Fix the dialog window creation
         private async Task ShowMessageDialogAsync(string text, string title = "")
         {
-            var win = new Window
+            await Dispatcher.UIThread.InvokeAsync(async () =>
             {
-                Title = title,
-                Width = 480,
-                Height = 160,
-                Content = new StackPanel
+                var dialog = new Window
                 {
-                    Margin = new Thickness(12),
-                    Children =
-                    {
-                        new TextBlock { Text = text, TextWrapping = Avalonia.Media.TextWrapping.Wrap },
-                        new StackPanel {
-                            Orientation = Avalonia.Layout.Orientation.Horizontal,
-                            HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Right,
-                            Margin = new Thickness(0,12,0,0),
-                            Children =
-                            {
-                                new Button { Content = "OK", IsDefault=true, IsCancel=true, Width = 90 }
-                            }
-                        }
-                    }
-                }
-            };
+                    Title = title,
+                    Width = 480,
+                    Height = 160,
+                    WindowStartupLocation = WindowStartupLocation.CenterOwner,
+                    SizeToContent = SizeToContent.Manual
+                };
 
-            var ok = win.GetVisualDescendants().OfType<Button>().FirstOrDefault();
-            if (ok != null) ok.Click += (_, __) => win.Close();
+                var panel = new StackPanel
+                {
+                    Margin = new Thickness(20),
+                    VerticalAlignment = Avalonia.Layout.VerticalAlignment.Stretch
+                };
 
-            try { await win.ShowDialog(this); } catch { }
-            AppendLog((string.IsNullOrEmpty(title) ? "" : title + ": ") + text);
+                var textBlock = new TextBlock
+                {
+                    Text = text,
+                    TextWrapping = Avalonia.Media.TextWrapping.Wrap,
+                    VerticalAlignment = Avalonia.Layout.VerticalAlignment.Stretch
+                };
+
+                var buttonPanel = new StackPanel
+                {
+                    Orientation = Avalonia.Layout.Orientation.Horizontal,
+                    HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Center,
+                    VerticalAlignment = Avalonia.Layout.VerticalAlignment.Bottom,
+                    Margin = new Thickness(0, 20, 0, 0)
+                };
+
+                var okButton = new Button
+                {
+                    Content = "OK",
+                    Width = 80,
+                    IsDefault = true,
+                    IsCancel = true
+                };
+
+                okButton.Click += (s, e) => dialog.Close();
+
+                buttonPanel.Children.Add(okButton);
+                panel.Children.Add(textBlock);
+                panel.Children.Add(buttonPanel);
+                dialog.Content = panel;
+
+                await dialog.ShowDialog(this);
+                AppendLog((string.IsNullOrEmpty(title) ? "" : title + ": ") + text);
+            });
         }
 
         private Task ShowErrorAsync(string msg, string caption = "Error") => ShowMessageDialogAsync(msg, caption);
@@ -155,7 +177,7 @@ namespace Disgaea_DS_Manager
             {
                 var pb = this.FindControl<ProgressBar>("ProgressBar");
                 if (pb == null) return;
-                
+
                 try
                 {
                     int t = Math.Max(1, total);
@@ -210,7 +232,7 @@ namespace Disgaea_DS_Manager
                 string? file = await SelectFileAsync().ConfigureAwait(false);
                 if (file == null) return;
                 archivePath = file;
-                
+
                 _cts?.Cancel();
                 _cts = new CancellationTokenSource();
                 CancellationToken ct = _cts.Token;
@@ -243,6 +265,7 @@ namespace Disgaea_DS_Manager
             }
         }
 
+        // In MainWindow.axaml.cs - Fix the SaveArchiveAsync method to handle embedded MSND replacements
         private async Task SaveArchiveAsync()
         {
             try
@@ -257,23 +280,32 @@ namespace Disgaea_DS_Manager
                     await ShowWarningAsync("No files in archive to save.");
                     return;
                 }
-                
-                // For existing archives opened from disk, we don't need srcFolder
-                // The entries already contain the data we need to save
+
+                // Handle the case where srcFolder might be null but we have embedded MSND replacements
                 if (srcFolder == null && !archiveOpenedFromDisk)
                 {
-                    await ShowWarningAsync("Import a folder via root context menu first.");
-                    return;
+                    // Check if we have any embedded MSND entries that might need source files
+                    bool hasEmbeddedMsnd = entries.Any(e => e.IsMsnd && e.Children.Count > 0);
+                    if (hasEmbeddedMsnd)
+                    {
+                        await ShowWarningAsync("Cannot save archive with embedded MSND replacements without a source folder. Please set a source folder first.");
+                        return;
+                    }
+
+                    // For simple archives without embedded content, use a temporary approach
+                    string? tempFolder = await SelectFolderAsync("Select temporary folder for archive contents");
+                    if (tempFolder == null) return;
+                    srcFolder = tempFolder;
                 }
-                
+
                 _cts?.Cancel();
                 _cts = new CancellationTokenSource();
                 CancellationToken ct = _cts.Token;
                 Progress<(int current, int total)> progress = new(t => UpdateProgress(t.current, t.total));
-                
-                // Use empty string for srcFolder when saving existing archives
-                string sourceFolder = srcFolder ?? string.Empty;
-                await _archiveService.SaveArchiveAsync(archivePath, filetype!.Value, entries.ToList(), sourceFolder, progress, ct).ConfigureAwait(false);
+
+                await _archiveService.SaveArchiveAsync(archivePath, filetype!.Value, entries.ToList(),
+                    srcFolder ?? string.Empty, progress, ct).ConfigureAwait(false);
+
                 SetStatus(filetype == ArchiveType.MSND ? "MSND saved" : "DSARC saved");
                 AppendLog($"{filetype.ToString().ToUpper(CultureInfo.InvariantCulture)} saved.");
             }
@@ -382,7 +414,7 @@ namespace Disgaea_DS_Manager
         private void TreeView_PointerReleased(object? sender, PointerReleasedEventArgs e)
         {
             if (e.InitialPressMouseButton != MouseButton.Right) return;
-            
+
             var tree = this.FindControl<TreeView>("TreeView");
             if (tree == null) return;
 
@@ -692,14 +724,27 @@ namespace Disgaea_DS_Manager
         private Task _archive_service_ExtractChunkAsync(string archivePath, Entry parentEntry, Entry chunkEntry, string dest, CancellationToken ct)
             => _archiveService.ExtractChunkItemAsync(archivePath, parentEntry, chunkEntry, dest, ct);
 
+        // In MainWindow.axaml.cs - Fix the ReplaceChunkItemAsync method
         private async Task<byte[]> ReplaceChunkItemAsync()
         {
             var tree = this.FindControl<TreeView>("TreeView");
-            if (tree?.SelectedItem is not TreeViewItem node) { await ShowWarningAsync("Invalid selection"); return Array.Empty<byte>(); }
+            if (tree?.SelectedItem is not TreeViewItem node)
+            {
+                await ShowWarningAsync("Invalid selection");
+                return Array.Empty<byte>();
+            }
 
             var parent = node.Parent as TreeViewItem;
-            if (parent?.DataContext is not Entry parentEntry) { await ShowWarningAsync("Invalid parent"); return Array.Empty<byte>(); }
-            if (node.DataContext is not Entry chunkEntry) { await ShowWarningAsync("Invalid chunk"); return Array.Empty<byte>(); }
+            if (parent?.DataContext is not Entry parentEntry)
+            {
+                await ShowWarningAsync("Invalid parent");
+                return Array.Empty<byte>();
+            }
+            if (node.DataContext is not Entry chunkEntry)
+            {
+                await ShowWarningAsync("Invalid chunk");
+                return Array.Empty<byte>();
+            }
 
             string? replacement = await SelectFileAsync().ConfigureAwait(false);
             if (replacement == null) return Array.Empty<byte>();
@@ -708,10 +753,27 @@ namespace Disgaea_DS_Manager
             {
                 _cts?.Cancel();
                 _cts = new CancellationTokenSource();
-                byte[] rebuilt = await _archiveService.ReplaceChunkItemAsync(archivePath!, parentEntry, chunkEntry, replacement, srcFolder ?? string.Empty, _cts.Token).ConfigureAwait(false);
+
+                // Ensure we have a valid srcFolder for the replacement
+                if (string.IsNullOrEmpty(srcFolder))
+                {
+                    // If no srcFolder is set, use the directory of the replacement file
+                    srcFolder = Path.GetDirectoryName(replacement);
+                    if (string.IsNullOrEmpty(srcFolder))
+                    {
+                        await ShowErrorAsync("Cannot determine source folder for replacement");
+                        return Array.Empty<byte>();
+                    }
+                }
+
+                byte[] rebuilt = await _archiveService.ReplaceChunkItemAsync(
+                    archivePath!, parentEntry, chunkEntry, replacement, srcFolder, _cts.Token).ConfigureAwait(false);
+
+                // Update the parent entry with the new MSND structure
                 parentEntry.Children.Clear();
                 foreach (Entry child in Msnd.Parse(rebuilt, Path.GetFileNameWithoutExtension(parentEntry.Path.Name)))
                     parentEntry.Children.Add(child);
+
                 RefreshTree();
                 SetStatus("File replaced - use Save");
                 AppendLog($"Rebuilt embedded MSND {parentEntry.Path.Name} after replacing {Path.GetExtension(chunkEntry.Path.Name)}");

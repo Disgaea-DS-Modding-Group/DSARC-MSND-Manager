@@ -56,9 +56,17 @@ namespace Disgaea_DS_Manager
                 throw new ArgumentNullException(nameof(path));
             if (entries == null || entries.Count == 0)
                 throw new ArgumentException("No entries to save", nameof(entries));
-            if (string.IsNullOrEmpty(srcFolder))
-                throw new ArgumentNullException(nameof(srcFolder));
 
+            // Allow empty srcFolder for cases where we're saving existing archives with embedded content
+            if (string.IsNullOrEmpty(srcFolder) && type == ArchiveType.DSARC)
+            {
+                // Check if we're trying to save embedded MSND content without source files
+                bool hasEmbeddedContent = entries.Any(e => e.IsMsnd || e.Children.Count > 0);
+                if (hasEmbeddedContent)
+                {
+                    throw new InvalidOperationException("Cannot save DSARC with embedded MSND content without a source folder. Source folder is required to resolve embedded file paths.");
+                }
+            }
             await Task.Run(() =>
             {
                 ct.ThrowIfCancellationRequested();
