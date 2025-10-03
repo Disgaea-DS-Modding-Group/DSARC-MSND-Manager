@@ -257,9 +257,12 @@ namespace Disgaea_DS_Manager
                     await ShowWarningAsync("No files in archive to save.");
                     return;
                 }
-                if (srcFolder == null)
+                
+                // For existing archives opened from disk, we don't need srcFolder
+                // The entries already contain the data we need to save
+                if (srcFolder == null && !archiveOpenedFromDisk)
                 {
-                    await ShowWarningAsync(archiveOpenedFromDisk ? "No files in archive to save." : "Import a folder via root context menu first.");
+                    await ShowWarningAsync("Import a folder via root context menu first.");
                     return;
                 }
                 
@@ -267,7 +270,10 @@ namespace Disgaea_DS_Manager
                 _cts = new CancellationTokenSource();
                 CancellationToken ct = _cts.Token;
                 Progress<(int current, int total)> progress = new(t => UpdateProgress(t.current, t.total));
-                await _archiveService.SaveArchiveAsync(archivePath, filetype!.Value, entries.ToList(), srcFolder, progress, ct).ConfigureAwait(false);
+                
+                // Use empty string for srcFolder when saving existing archives
+                string sourceFolder = srcFolder ?? string.Empty;
+                await _archiveService.SaveArchiveAsync(archivePath, filetype!.Value, entries.ToList(), sourceFolder, progress, ct).ConfigureAwait(false);
                 SetStatus(filetype == ArchiveType.MSND ? "MSND saved" : "DSARC saved");
                 AppendLog($"{filetype.ToString().ToUpper(CultureInfo.InvariantCulture)} saved.");
             }
@@ -309,9 +315,11 @@ namespace Disgaea_DS_Manager
                 var tree = this.FindControl<TreeView>("TreeView");
                 if (tree == null) return;
 
-                var items = new AvaloniaList<TreeViewItem>();
                 string rootText = archivePath != null ? Path.GetFileName(archivePath) : "[New Archive]";
                 rootItem = new TreeViewItem { Header = rootText, DataContext = null, IsExpanded = true };
+
+                // Create child items for the root
+                var rootChildren = new AvaloniaList<TreeViewItem>();
 
                 if (filetype == ArchiveType.DSARC)
                 {
@@ -327,11 +335,11 @@ namespace Disgaea_DS_Manager
                             }
                             // set the child items via ItemsSourceProperty (not ItemsProperty)
                             msNode.SetValue(ItemsControl.ItemsSourceProperty, childList);
-                            items.Add(msNode);
+                            rootChildren.Add(msNode);
                         }
                         else
                         {
-                            items.Add(new TreeViewItem { Header = e.Path.Name, DataContext = e });
+                            rootChildren.Add(new TreeViewItem { Header = e.Path.Name, DataContext = e });
                         }
                     }
                 }
@@ -339,13 +347,15 @@ namespace Disgaea_DS_Manager
                 {
                     foreach (Entry e in entries)
                     {
-                        items.Add(new TreeViewItem { Header = e.Path.Name, DataContext = e });
+                        rootChildren.Add(new TreeViewItem { Header = e.Path.Name, DataContext = e });
                     }
                 }
 
-                // Always add the root item first
+                // Set the root item's children
+                rootItem.SetValue(ItemsControl.ItemsSourceProperty, rootChildren);
+
+                // Create the main items list with just the root
                 var allItems = new AvaloniaList<TreeViewItem> { rootItem };
-                allItems.AddRange(items);
 
                 // set items via ItemsSourceProperty (Items is read-only)
                 tree.SetValue(ItemsControl.ItemsSourceProperty, allItems);
