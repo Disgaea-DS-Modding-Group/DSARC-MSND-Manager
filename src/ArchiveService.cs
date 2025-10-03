@@ -57,16 +57,6 @@ namespace Disgaea_DS_Manager
             if (entries == null || entries.Count == 0)
                 throw new ArgumentException("No entries to save", nameof(entries));
 
-            // Allow empty srcFolder for cases where we're saving existing archives with embedded content
-            if (string.IsNullOrEmpty(srcFolder) && type == ArchiveType.DSARC)
-            {
-                // Check if we're trying to save embedded MSND content without source files
-                bool hasEmbeddedContent = entries.Any(e => e.IsMsnd || e.Children.Count > 0);
-                if (hasEmbeddedContent)
-                {
-                    throw new InvalidOperationException("Cannot save DSARC with embedded MSND content without a source folder. Source folder is required to resolve embedded file paths.");
-                }
-            }
             await Task.Run(() =>
             {
                 ct.ThrowIfCancellationRequested();
@@ -74,23 +64,75 @@ namespace Disgaea_DS_Manager
                 {
                     var chunks = new Dictionary<string, byte[]>(StringComparer.OrdinalIgnoreCase);
                     int total = Msnd.MSNDORDER.Length;
+
+                    // Build a lookup of existing files in the source folder by extension
+                    var sourceFilesByExt = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+                    if (Directory.Exists(srcFolder))
+                    {
+                        foreach (string file in Directory.GetFiles(srcFolder, "*.*", SearchOption.AllDirectories))
+                        {
+                            string ext = Path.GetExtension(file).ToLowerInvariant();
+                            if (Msnd.MSNDORDER.Contains(ext))
+                            {
+                                sourceFilesByExt[ext] = file;
+                            }
+                        }
+                    }
+
                     for (int i = 0; i < total; i++)
                     {
                         ct.ThrowIfCancellationRequested();
                         string ext = Msnd.MSNDORDER[i];
-                        string? sourcePath = entries.FirstOrDefault(e => string.Equals(e.Path.Extension, ext, StringComparison.OrdinalIgnoreCase))?.Path.ToString();
-                        sourcePath = sourcePath != null ? Path.Combine(srcFolder, sourcePath) : Directory.GetFiles(srcFolder, $"*{ext}", SearchOption.TopDirectoryOnly).FirstOrDefault();
+
+                        // First try to find the file using the entry's path
+                        string? sourcePath = null;
+                        var entryForExt = entries.FirstOrDefault(e =>
+                            string.Equals(Path.GetExtension(e.Path.Name), ext, StringComparison.OrdinalIgnoreCase));
+
+                        if (entryForExt != null)
+                        {
+                            // Try the exact path from the entry
+                            string candidate = Path.Combine(srcFolder, entryForExt.Path.Name);
+                            if (File.Exists(candidate))
+                            {
+                                sourcePath = candidate;
+                            }
+                            else
+                            {
+                                // If exact path doesn't exist, search for any file with the same extension
+                                string[] matches = Directory.GetFiles(srcFolder, $"*{ext}", SearchOption.AllDirectories);
+                                if (matches.Length > 0)
+                                {
+                                    sourcePath = matches[0];
+                                }
+                            }
+                        }
+
+                        // If still not found, use the pre-built lookup
+                        if (sourcePath == null && sourceFilesByExt.ContainsKey(ext))
+                        {
+                            sourcePath = sourceFilesByExt[ext];
+                        }
+
                         if (sourcePath == null)
                         {
-                            throw new FileNotFoundException($"Missing {ext} in {srcFolder}");
+                            throw new FileNotFoundException($"Missing {ext} file. Searched in: {srcFolder}");
                         }
-                        chunks[ext] = File.ReadAllBytes(sourcePath);
+
+                        // Fix file locking here
+                        using (FileStream fs = new FileStream(sourcePath, FileMode.Open, FileAccess.Read, FileShare.Read))
+                        {
+                            byte[] buffer = new byte[fs.Length];
+                            fs.Read(buffer, 0, buffer.Length);
+                            chunks[ext] = buffer;
+                        }
                         progress?.Report((i + 1, total));
                     }
                     File.WriteAllBytes(path, Msnd.Build(chunks));
                 }
                 else
                 {
+                    // DSARC saving logic remains the same but with file locking fixes
                     string mappingPath = Path.Combine(srcFolder, "mapper.txt");
                     if (File.Exists(mappingPath))
                     {
@@ -111,6 +153,7 @@ namespace Disgaea_DS_Manager
                             string left = parts[0].Trim();
                             string right = parts[1].Trim();
                             string candidate = Path.Combine(srcFolder, right);
+
                             if (Directory.Exists(candidate))
                             {
                                 byte[] childBuf = RebuildNestedFromFolderAsync(candidate, ct).GetAwaiter().GetResult();
@@ -124,16 +167,30 @@ namespace Disgaea_DS_Manager
                                 progress?.Report((i + 1, total));
                                 continue;
                             }
+
                             if (File.Exists(candidate))
                             {
-                                pairs.Add(Tuple.Create(left, File.ReadAllBytes(candidate)));
+                                // Fix file locking in DSARC file reading
+                                using (FileStream fs = new FileStream(candidate, FileMode.Open, FileAccess.Read, FileShare.Read))
+                                {
+                                    byte[] fileData = new byte[fs.Length];
+                                    fs.Read(fileData, 0, fileData.Length);
+                                    pairs.Add(Tuple.Create(left, fileData));
+                                }
                                 progress?.Report((i + 1, total));
                                 continue;
                             }
+
                             string[] matches = Directory.GetFiles(srcFolder, Path.GetFileName(right), SearchOption.AllDirectories);
                             if (matches.Length > 0)
                             {
-                                pairs.Add(Tuple.Create(left, File.ReadAllBytes(matches[0])));
+                                // Fix file locking in matched file reading
+                                using (FileStream fs = new FileStream(matches[0], FileMode.Open, FileAccess.Read, FileShare.Read))
+                                {
+                                    byte[] fileData = new byte[fs.Length];
+                                    fs.Read(fileData, 0, fileData.Length);
+                                    pairs.Add(Tuple.Create(left, fileData));
+                                }
                                 progress?.Report((i + 1, total));
                                 continue;
                             }
@@ -148,6 +205,7 @@ namespace Disgaea_DS_Manager
                     }
                     else
                     {
+                        // Similar fixes for the non-mapping path...
                         var pairs = new Collection<Tuple<string, byte[]>>();
                         int total = entries.Count;
                         for (int i = 0; i < entries.Count; i++)
@@ -155,6 +213,7 @@ namespace Disgaea_DS_Manager
                             ct.ThrowIfCancellationRequested();
                             Entry e = entries[i];
                             string candidate = Path.Combine(srcFolder, e.Path.ToString());
+
                             if (Directory.Exists(candidate))
                             {
                                 byte[] childBuf = RebuildNestedFromFolderAsync(candidate, ct).GetAwaiter().GetResult();
@@ -164,16 +223,30 @@ namespace Disgaea_DS_Manager
                                 progress?.Report((i + 1, total));
                                 continue;
                             }
+
                             if (File.Exists(candidate))
                             {
-                                pairs.Add(Tuple.Create(e.Path.ToString(), File.ReadAllBytes(candidate)));
+                                // Fix file locking
+                                using (FileStream fs = new FileStream(candidate, FileMode.Open, FileAccess.Read, FileShare.Read))
+                                {
+                                    byte[] fileData = new byte[fs.Length];
+                                    fs.Read(fileData, 0, fileData.Length);
+                                    pairs.Add(Tuple.Create(e.Path.ToString(), fileData));
+                                }
                                 progress?.Report((i + 1, total));
                                 continue;
                             }
+
                             string[] matches = Directory.GetFiles(srcFolder, Path.GetFileName(e.Path.ToString()), SearchOption.AllDirectories);
                             if (matches.Length > 0)
                             {
-                                pairs.Add(Tuple.Create(e.Path.ToString(), File.ReadAllBytes(matches[0])));
+                                // Fix file locking
+                                using (FileStream fs = new FileStream(matches[0], FileMode.Open, FileAccess.Read, FileShare.Read))
+                                {
+                                    byte[] fileData = new byte[fs.Length];
+                                    fs.Read(fileData, 0, fileData.Length);
+                                    pairs.Add(Tuple.Create(e.Path.ToString(), fileData));
+                                }
                                 progress?.Report((i + 1, total));
                                 continue;
                             }
@@ -715,6 +788,8 @@ namespace Disgaea_DS_Manager
             }, ct).ConfigureAwait(false);
         }
 
+        // In ArchiveService.cs - Update the BuildDsarcFromFolder method to handle missing files better
+        // In ArchiveService.cs - Update the BuildDsarcFromFolder method
         private byte[] BuildDsarcFromFolder(string folder)
         {
             if (!Directory.Exists(folder))
@@ -724,6 +799,8 @@ namespace Disgaea_DS_Manager
             if (File.Exists(mapper))
             {
                 var pairs = new Collection<Tuple<string, byte[]>>();
+                var missingFiles = new List<string>();
+
                 foreach (string ln in File.ReadAllLines(mapper, Encoding.UTF8))
                 {
                     if (!ln.Contains('=', StringComparison.Ordinal)) continue;
@@ -731,26 +808,68 @@ namespace Disgaea_DS_Manager
                     string left = parts[0].Trim();
                     string right = parts[1].Trim();
                     string candidate = Path.Combine(folder, right);
+
                     if (Directory.Exists(candidate))
                     {
-                        byte[] child = RebuildNestedFromFolderAsync(candidate).GetAwaiter().GetResult();
-                        if (child == null || child.Length == 0)
-                            throw new InvalidOperationException($"Failed to rebuild nested archive at {candidate}");
-                        pairs.Add(Tuple.Create(left, child));
+                        try
+                        {
+                            byte[] child = RebuildNestedFromFolderAsync(candidate).GetAwaiter().GetResult();
+                            if (child == null || child.Length == 0)
+                                throw new InvalidOperationException($"Failed to rebuild nested archive at {candidate}");
+                            pairs.Add(Tuple.Create(left, child));
+                        }
+                        catch (Exception ex)
+                        {
+                            missingFiles.Add($"{right} (rebuild failed: {ex.Message})");
+                        }
                         continue;
                     }
+
+                    // Check for exact file match first
                     if (File.Exists(candidate))
                     {
-                        pairs.Add(Tuple.Create(left, File.ReadAllBytes(candidate)));
+                        try
+                        {
+                            using (FileStream fs = new FileStream(candidate, FileMode.Open, FileAccess.Read, FileShare.Read))
+                            {
+                                byte[] fileData = new byte[fs.Length];
+                                fs.Read(fileData, 0, fileData.Length);
+                                pairs.Add(Tuple.Create(left, fileData));
+                            }
+                        }
+                        catch (Exception ex)
+                        {
+                            missingFiles.Add($"{right} (read failed: {ex.Message})");
+                        }
                         continue;
                     }
-                    string[] matches = Directory.GetFiles(folder, Path.GetFileName(right), SearchOption.AllDirectories);
+
+                    // If exact match not found, search by filename with extension
+                    string fileName = Path.GetFileName(right);
+                    string[] matches = Directory.GetFiles(folder, fileName, SearchOption.AllDirectories);
                     if (matches.Length > 0)
                     {
-                        pairs.Add(Tuple.Create(left, File.ReadAllBytes(matches[0])));
+                        try
+                        {
+                            using (FileStream fs = new FileStream(matches[0], FileMode.Open, FileAccess.Read, FileShare.Read))
+                            {
+                                byte[] fileData = new byte[fs.Length];
+                                fs.Read(fileData, 0, fileData.Length);
+                                pairs.Add(Tuple.Create(left, fileData));
+                            }
+                        }
+                        catch (Exception ex)
+                        {
+                            missingFiles.Add($"{right} (read failed: {ex.Message})");
+                        }
                         continue;
                     }
-                    throw new FileNotFoundException($"File not found: {candidate}");
+                    missingFiles.Add(right);
+                }
+
+                if (missingFiles.Count > 0)
+                {
+                    throw new FileNotFoundException($"The following files referenced in mapper.txt are missing or inaccessible:\n{string.Join("\n", missingFiles)}");
                 }
                 return Dsarc.BuildFromPairs(pairs);
             }
@@ -765,6 +884,9 @@ namespace Disgaea_DS_Manager
             return Dsarc.BuildFromPairs(list);
         }
 
+        // In ArchiveService.cs - Fix the BuildMsndFromFolder method
+        // In ArchiveService.cs - Fix BuildMsndFromFolder and related methods
+        // In ArchiveService.cs - Update the BuildMsndFromFolder method
         private static byte[] BuildMsndFromFolder(string folder)
         {
             if (!Directory.Exists(folder))
@@ -772,32 +894,58 @@ namespace Disgaea_DS_Manager
 
             string baseName = Path.GetFileName(folder);
             var chunks = new Dictionary<string, byte[]>(StringComparer.OrdinalIgnoreCase);
+
             foreach (string ext in Msnd.MSNDORDER)
             {
                 string exact = Path.Combine(folder, baseName + ext);
                 string? chosen = File.Exists(exact) ? exact : Directory.GetFiles(folder, $"*{ext}", SearchOption.TopDirectoryOnly).FirstOrDefault();
                 if (chosen == null)
                     throw new FileNotFoundException($"Missing expected MSND file {ext} in {folder}");
-                chunks[ext] = File.ReadAllBytes(chosen);
+
+                // Use FileStream with proper disposal and FileShare.Read to avoid locking
+                using (FileStream fileStream = new FileStream(chosen, FileMode.Open, FileAccess.Read, FileShare.Read))
+                {
+                    byte[] buffer = new byte[fileStream.Length];
+                    int bytesRead = fileStream.Read(buffer, 0, buffer.Length);
+                    if (bytesRead != buffer.Length)
+                    {
+                        Array.Resize(ref buffer, bytesRead);
+                    }
+                    chunks[ext] = buffer;
+                }
             }
+
             byte[]? txtBytes = null;
             string txtPath = Path.Combine(folder, baseName + ".txt");
             if (File.Exists(txtPath))
-                txtBytes = File.ReadAllBytes(txtPath);
+            {
+                using (FileStream txtStream = new FileStream(txtPath, FileMode.Open, FileAccess.Read, FileShare.Read))
+                {
+                    txtBytes = new byte[txtStream.Length];
+                    txtStream.Read(txtBytes, 0, txtBytes.Length);
+                }
+            }
+
             return Msnd.Build(chunks, txtBytes);
         }
 
+        // In ArchiveService.cs - Fix the UniqueOutName method
         private static string UniqueOutName(string baseName, string ext, string outdir, Dictionary<Tuple<string, string>, int> counters)
         {
+            // Use the full filename (including extension) as the key for uniqueness
             var key = Tuple.Create(baseName, ext ?? string.Empty);
             if (!counters.TryGetValue(key, out int count)) count = 0;
             count++;
             counters[key] = count;
+
             string candidate = count == 1
                 ? (string.IsNullOrEmpty(ext) ? baseName : $"{baseName}{ext}")
                 : (string.IsNullOrEmpty(ext) ? $"{baseName}_{count}" : $"{baseName}_{count}{ext}");
+
             string finalName = candidate;
             int extra = 1;
+
+            // Check for both files and directories with the same name
             while (File.Exists(Path.Combine(outdir, finalName)) || Directory.Exists(Path.Combine(outdir, finalName)))
             {
                 finalName = string.IsNullOrEmpty(ext)

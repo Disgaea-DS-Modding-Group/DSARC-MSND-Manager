@@ -77,9 +77,34 @@ namespace Disgaea_DS_Manager
             }
         }
 
+        // In MainWindow.axaml.cs - Update the SelectFileAsync method
         private async Task<string?> SelectFileAsync(string filter = "All Files (*.*)|*.*")
         {
             var dlg = new OpenFileDialog { AllowMultiple = false };
+
+            // Add filter for Disgaea DS archive files
+            var archiveFilter = new FileDialogFilter
+            {
+                Name = "Disgaea DS Archives",
+                Extensions = new List<string> { "dat", "msnd" }
+            };
+
+            var allFilesFilter = new FileDialogFilter
+            {
+                Name = "All Files",
+                Extensions = new List<string> { "*" }
+            };
+
+            // Set filters based on the requested filter
+            if (filter.Contains("All Files"))
+            {
+                dlg.Filters = new List<FileDialogFilter> { allFilesFilter };
+            }
+            else
+            {
+                dlg.Filters = new List<FileDialogFilter> { archiveFilter, allFilesFilter };
+            }
+
             try
             {
                 var res = await dlg.ShowAsync(this);
@@ -225,11 +250,13 @@ namespace Disgaea_DS_Manager
             }
         }
 
+        // Update the OpenArchiveAsync method to use the archive filter
         private async Task OpenArchiveAsync(IArchiveService archiveService)
         {
             try
             {
-                string? file = await SelectFileAsync().ConfigureAwait(false);
+                // Use the archive filter for opening files
+                string? file = await SelectFileAsync("Disgaea DS Archives (*.dat, *.msnd)|*.dat;*.msnd").ConfigureAwait(false);
                 if (file == null) return;
                 archivePath = file;
 
@@ -667,11 +694,42 @@ namespace Disgaea_DS_Manager
                     await ShowWarningAsync("Replacement must be sseq/sbnk/swar");
                     return;
                 }
-                srcFolder ??= Path.GetDirectoryName(replacement);
-                await _archiveService.CopyFileToFolderAsync(replacement, srcFolder!, CancellationToken.None).ConfigureAwait(false);
-                entries[idx].Path = new FileInfo(Path.GetFileName(replacement));
+
+                // For MSND replacements, ensure the file is copied to the source folder
+                if (filetype == ArchiveType.MSND)
+                {
+                    // Set srcFolder if not already set
+                    if (string.IsNullOrEmpty(srcFolder))
+                    {
+                        srcFolder = Path.GetDirectoryName(replacement);
+                        if (string.IsNullOrEmpty(srcFolder))
+                        {
+                            await ShowErrorAsync("Cannot determine source folder");
+                            return;
+                        }
+                    }
+
+                    // Copy the replacement file to the source folder
+                    string targetPath = Path.Combine(srcFolder, Path.GetFileName(replacement));
+                    if (!string.Equals(replacement, targetPath, StringComparison.OrdinalIgnoreCase))
+                    {
+                        File.Copy(replacement, targetPath, true);
+                    }
+
+                    // Update the entry to point to the new file
+                    entries[idx].Path = new FileInfo(Path.GetFileName(replacement));
+                }
+                else
+                {
+                    // For DSARC, use the original logic
+                    srcFolder ??= Path.GetDirectoryName(replacement);
+                    await _archiveService.CopyFileToFolderAsync(replacement, srcFolder!, CancellationToken.None).ConfigureAwait(false);
+                    entries[idx].Path = new FileInfo(Path.GetFileName(replacement));
+                }
+
                 RefreshTree();
                 SetStatus("File replaced");
+                AppendLog($"Replaced file with: {Path.GetFileName(replacement)}");
             }
             catch (IOException io)
             {
@@ -725,6 +783,7 @@ namespace Disgaea_DS_Manager
             => _archiveService.ExtractChunkItemAsync(archivePath, parentEntry, chunkEntry, dest, ct);
 
         // In MainWindow.axaml.cs - Fix the ReplaceChunkItemAsync method
+        // In MainWindow.axaml.cs - Fix the ReplaceChunkItemAsync method
         private async Task<byte[]> ReplaceChunkItemAsync()
         {
             var tree = this.FindControl<TreeView>("TreeView");
@@ -754,7 +813,8 @@ namespace Disgaea_DS_Manager
                 _cts?.Cancel();
                 _cts = new CancellationTokenSource();
 
-                // Ensure we have a valid srcFolder for the replacement
+                // For embedded MSND replacements, we need to ensure the MSND file exists in srcFolder
+                // If it doesn't exist, we need to extract it first or create the directory structure
                 if (string.IsNullOrEmpty(srcFolder))
                 {
                     // If no srcFolder is set, use the directory of the replacement file
@@ -764,6 +824,15 @@ namespace Disgaea_DS_Manager
                         await ShowErrorAsync("Cannot determine source folder for replacement");
                         return Array.Empty<byte>();
                     }
+                }
+
+                // Ensure the MSND file exists in the source folder
+                string msndTargetPath = Path.Combine(srcFolder, parentEntry.Path.Name);
+                if (!File.Exists(msndTargetPath))
+                {
+                    // Extract the current MSND to the source folder so we have a base to modify
+                    await _archiveService.ExtractItemAsync(archivePath!, ArchiveType.DSARC, parentEntry, srcFolder, _cts.Token);
+                    AppendLog($"Extracted base MSND file to {msndTargetPath} for modification");
                 }
 
                 byte[] rebuilt = await _archiveService.ReplaceChunkItemAsync(
