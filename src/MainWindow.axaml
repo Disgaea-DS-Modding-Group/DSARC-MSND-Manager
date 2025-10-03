@@ -16,23 +16,19 @@
 				<MenuItem x:Name="ExitMenu" Header="E_xit" />
 			</MenuItem>
 		</Menu>
-
 		<!-- Status bar (simple StackPanel used to avoid StatusBar availability differences) -->
 		<StackPanel DockPanel.Dock="Bottom" x:Name="StatusBar" Orientation="Horizontal" Margin="6">
 			<TextBlock x:Name="StatusLabel" Text="Ready" VerticalAlignment="Center" />
 			<ProgressBar x:Name="ProgressBar" Width="250" Minimum="0" Maximum="1" Value="0" Margin="12,0" VerticalAlignment="Center"/>
 		</StackPanel>
-
 		<!-- Main content: split vertically: TreeView upper, Log lower -->
 		<Grid>
 			<Grid.RowDefinitions>
 				<RowDefinition Height="*" />
 				<RowDefinition Height="300" />
 			</Grid.RowDefinitions>
-
-		<!-- Tree view -->
-		<TreeView x:Name="TreeView" Grid.Row="0" Margin="6" HorizontalAlignment="Stretch" VerticalAlignment="Stretch" />
-
+			<!-- Tree view -->
+			<TreeView x:Name="TreeView" Grid.Row="0" Margin="6" HorizontalAlignment="Stretch" VerticalAlignment="Stretch" />
 			<!-- Log -->
 			<TextBox x:Name="LogTextBox"
 					 Grid.Row="1"

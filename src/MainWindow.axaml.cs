@@ -4,7 +4,6 @@ using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Interactivity;
 using Avalonia.Threading;
-using Avalonia.VisualTree;
 using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
@@ -13,1145 +12,830 @@ using System.IO;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
-
-namespace Disgaea_DS_Manager
+namespace Disgaea_DS_Manager;
+public partial class MainWindow : Window
 {
-    public partial class MainWindow : Window
+    private string? _archivePath;
+    private Collection<Entry> _entries = [];
+    private string? _srcFolder;
+    private ArchiveType? _filetype;
+    private TreeViewItem? _rootItem;
+    private bool _archiveOpenedFromDisk;
+    private readonly IArchiveService _archiveService;
+    private CancellationTokenSource? _cts;
+    [Obsolete] public MainWindow() : this(new ArchiveService()) { }
+    [Obsolete]
+    public MainWindow(IArchiveService archiveService)
     {
-        private string? archivePath;
-        private Collection<Entry> entries = new();
-        private string? srcFolder;
-        private ArchiveType? filetype;
-        private TreeViewItem? rootItem;
-        private bool archiveOpenedFromDisk;
-        private readonly IArchiveService _archiveService;
-        private CancellationTokenSource? _cts;
-
-        public MainWindow() : this(new ArchiveService()) { }
-
-        public MainWindow(IArchiveService archiveService)
+        _archiveService = archiveService ?? throw new ArgumentNullException(nameof(archiveService));
+        InitializeComponent();
+        if (!Design.IsDesignMode)
         {
-            _archiveService = archiveService ?? throw new ArgumentNullException(nameof(archiveService));
-            InitializeComponent();
-
-            if (!Design.IsDesignMode)
-                WireUpEvents();
+            WireUpEvents();
         }
-
-        private void WireUpEvents()
+    }
+    [Obsolete]
+    private void WireUpEvents()
+    {
+        AttachMenuItem("NewMenu", _ => NewArchive());
+        AttachMenuItem("OpenMenu", async _ => await OpenArchiveAsync().ConfigureAwait(false));
+        AttachMenuItem("SaveMenu", async _ => await SaveArchiveAsync().ConfigureAwait(false));
+        AttachMenuItem("SaveAsMenu", async _ => await SaveAsAsync().ConfigureAwait(false));
+        AttachMenuItem("ExitMenu", _ => Close());
+        if (this.FindControl<TreeView>("TreeView") is { } tree)
         {
-            var newMenu = this.FindControl<MenuItem>("NewMenu");
-            var openMenu = this.FindControl<MenuItem>("OpenMenu");
-            var saveMenu = this.FindControl<MenuItem>("SaveMenu");
-            var saveAsMenu = this.FindControl<MenuItem>("SaveAsMenu");
-            var exitMenu = this.FindControl<MenuItem>("ExitMenu");
-            var tree = this.FindControl<TreeView>("TreeView");
-
-            if (newMenu != null) newMenu.Click += (_, __) => NewArchive();
-            if (openMenu != null) openMenu.Click += async (_, __) => await OpenArchiveAsync(_archiveService).ConfigureAwait(false);
-            if (saveMenu != null) saveMenu.Click += async (_, __) => await SaveArchiveAsync().ConfigureAwait(false);
-            if (saveAsMenu != null) saveAsMenu.Click += async (_, __) => await SaveAsAsync().ConfigureAwait(false);
-            if (exitMenu != null) exitMenu.Click += (_, __) => Close();
-
-            if (tree != null)
-            {
-                tree.SelectionChanged += TreeView_SelectionChanged;
-                tree.AddHandler(InputElement.PointerReleasedEvent, TreeView_PointerReleased, RoutingStrategies.Tunnel);
-            }
-
+            tree.SelectionChanged += TreeView_SelectionChanged;
+            tree.AddHandler(InputElement.PointerReleasedEvent, TreeView_PointerReleased, RoutingStrategies.Tunnel);
         }
-
-        #region UI helpers
-
-        private async Task<string?> SelectFolderAsync(string? title = null)
+    }
+    private void AttachMenuItem(string name, Action<RoutedEventArgs> handler)
+    {
+        if (this.FindControl<MenuItem>(name) is { } menuItem)
         {
-            var dlg = new OpenFolderDialog();
-            if (!string.IsNullOrEmpty(title)) dlg.Title = title;
-            try
-            {
-                return await dlg.ShowAsync(this);
-            }
-            catch
-            {
-                return null;
-            }
+            menuItem.Click += (s, e) => handler(e);
         }
-
-        // In MainWindow.axaml.cs - Update the SelectFileAsync method
-        private async Task<string?> SelectFileAsync(string filter = "All Files (*.*)|*.*")
+    }
+    private void AttachMenuItem(string name, Func<RoutedEventArgs, Task> handler)
+    {
+        if (this.FindControl<MenuItem>(name) is { } menuItem)
         {
-            var dlg = new OpenFileDialog { AllowMultiple = false };
-
-            // Add filter for Disgaea DS archive files
-            var archiveFilter = new FileDialogFilter
+            menuItem.Click += async (s, e) => await handler(e);
+        }
+    }
+    #region UI Helpers
+    [Obsolete]
+    private async Task<string?> SelectFolderAsync(string? title = null)
+    {
+        OpenFolderDialog dlg = new() { Title = title ?? "Select Folder" };
+        try { return await dlg.ShowAsync(this); } catch { return null; }
+    }
+    [Obsolete]
+    private async Task<string?> SelectFileAsync(string filter = "All Files (*.*)|*.*")
+    {
+        OpenFileDialog dlg = new()
+        {
+            AllowMultiple = false,
+            Filters = filter.Contains("All Files")
+                ? [new FileDialogFilter { Name = "All Files", Extensions = ["*"] }]
+                : [
+                    new FileDialogFilter { Name = "Disgaea DS Archives", Extensions = ["dat", "msnd"] },
+                    new FileDialogFilter { Name = "All Files", Extensions = ["*"] }
+                ]
+        };
+        try
+        {
+            string[]? res = await dlg.ShowAsync(this);
+            return res?.FirstOrDefault();
+        }
+        catch { return null; }
+    }
+    [Obsolete]
+    private async Task<string?> SelectSaveFileAsync(string filter = "All Files (*.*)|*.*")
+    {
+        SaveFileDialog dlg = new();
+        try { return await dlg.ShowAsync(this); } catch { return null; }
+    }
+    private async Task ShowMessageDialogAsync(string text, string title = "")
+    {
+        await Dispatcher.UIThread.InvokeAsync(async () =>
+        {
+            Window dialog = new()
             {
-                Name = "Disgaea DS Archives",
-                Extensions = new List<string> { "dat", "msnd" }
+                Title = title,
+                Width = 480,
+                Height = 160,
+                WindowStartupLocation = WindowStartupLocation.CenterOwner,
+                SizeToContent = SizeToContent.Manual
             };
-
-            var allFilesFilter = new FileDialogFilter
+            StackPanel panel = new()
             {
-                Name = "All Files",
-                Extensions = new List<string> { "*" }
+                Margin = new Thickness(20),
+                VerticalAlignment = Avalonia.Layout.VerticalAlignment.Stretch
             };
+            TextBlock textBlock = new()
+            {
+                Text = text,
+                TextWrapping = Avalonia.Media.TextWrapping.Wrap,
+                VerticalAlignment = Avalonia.Layout.VerticalAlignment.Stretch
+            };
+            StackPanel buttonPanel = new()
+            {
+                Orientation = Avalonia.Layout.Orientation.Horizontal,
+                HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Center,
+                VerticalAlignment = Avalonia.Layout.VerticalAlignment.Bottom,
+                Margin = new Thickness(0, 20, 0, 0)
+            };
+            Button okButton = new()
+            {
+                Content = "OK",
+                Width = 80,
+                IsDefault = true,
+                IsCancel = true
+            };
+            okButton.Click += (s, e) => dialog.Close();
+            buttonPanel.Children.Add(okButton);
+            panel.Children.Add(textBlock);
+            panel.Children.Add(buttonPanel);
+            dialog.Content = panel;
+            await dialog.ShowDialog(this);
+            AppendLog($"{(string.IsNullOrEmpty(title) ? "" : title + ": ")}{text}");
+        });
+    }
+    private Task ShowErrorAsync(string msg, string caption = "Error")
+    {
+        return ShowMessageDialogAsync(msg, caption);
+    }
 
-            // Set filters based on the requested filter
-            if (filter.Contains("All Files"))
+    private Task ShowWarningAsync(string msg, string caption = "Warning")
+    {
+        return ShowMessageDialogAsync(msg, caption);
+    }
+
+    private void AppendLog(string msg)
+    {
+        Dispatcher.UIThread.Post(() =>
+        {
+            if (this.FindControl<TextBox>("LogTextBox") is { } log)
             {
-                dlg.Filters = new List<FileDialogFilter> { allFilesFilter };
+                log.Text += $"{msg}\r\n";
+                log.CaretIndex = log.Text?.Length ?? 0;
             }
-            else
+        });
+    }
+    private void UpdateProgress(int val, int total)
+    {
+        Dispatcher.UIThread.Post(() =>
+        {
+            if (this.FindControl<ProgressBar>("ProgressBar") is not { } pb)
             {
-                dlg.Filters = new List<FileDialogFilter> { archiveFilter, allFilesFilter };
+                return;
             }
 
             try
             {
-                var res = await dlg.ShowAsync(this);
-                if (res != null && res.Length > 0) return res[0];
+                int t = Math.Max(1, total);
+                pb.Maximum = t;
+                pb.Value = Math.Clamp(val, 0, t);
             }
-            catch { }
-            return null;
-        }
-
-        private async Task<string?> SelectSaveFileAsync(string filter = "All Files (*.*)|*.*")
+            catch (ArgumentOutOfRangeException) { }
+        });
+    }
+    private void SetStatus(string text)
+    {
+        Dispatcher.UIThread.Post(() =>
         {
-            var dlg = new SaveFileDialog();
-            try
+            if (this.FindControl<TextBlock>("StatusLabel") is { } lbl)
             {
-                return await dlg.ShowAsync(this);
+                lbl.Text = text;
             }
-            catch { }
-            return null;
-        }
-
-        // In MainWindow.axaml.cs - Fix the dialog window creation
-        private async Task ShowMessageDialogAsync(string text, string title = "")
-        {
-            await Dispatcher.UIThread.InvokeAsync(async () =>
-            {
-                var dialog = new Window
-                {
-                    Title = title,
-                    Width = 480,
-                    Height = 160,
-                    WindowStartupLocation = WindowStartupLocation.CenterOwner,
-                    SizeToContent = SizeToContent.Manual
-                };
-
-                var panel = new StackPanel
-                {
-                    Margin = new Thickness(20),
-                    VerticalAlignment = Avalonia.Layout.VerticalAlignment.Stretch
-                };
-
-                var textBlock = new TextBlock
-                {
-                    Text = text,
-                    TextWrapping = Avalonia.Media.TextWrapping.Wrap,
-                    VerticalAlignment = Avalonia.Layout.VerticalAlignment.Stretch
-                };
-
-                var buttonPanel = new StackPanel
-                {
-                    Orientation = Avalonia.Layout.Orientation.Horizontal,
-                    HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Center,
-                    VerticalAlignment = Avalonia.Layout.VerticalAlignment.Bottom,
-                    Margin = new Thickness(0, 20, 0, 0)
-                };
-
-                var okButton = new Button
-                {
-                    Content = "OK",
-                    Width = 80,
-                    IsDefault = true,
-                    IsCancel = true
-                };
-
-                okButton.Click += (s, e) => dialog.Close();
-
-                buttonPanel.Children.Add(okButton);
-                panel.Children.Add(textBlock);
-                panel.Children.Add(buttonPanel);
-                dialog.Content = panel;
-
-                await dialog.ShowDialog(this);
-                AppendLog((string.IsNullOrEmpty(title) ? "" : title + ": ") + text);
-            });
-        }
-
-        private Task ShowErrorAsync(string msg, string caption = "Error") => ShowMessageDialogAsync(msg, caption);
-        private Task ShowWarningAsync(string msg, string caption = "Warning") => ShowMessageDialogAsync(msg, caption);
-
-        private void AppendLog(string msg)
-        {
-            Dispatcher.UIThread.Post(() =>
-            {
-                var log = this.FindControl<TextBox>("LogTextBox");
-                if (log != null)
-                {
-                    log.Text += $"{msg}\r\n";
-                    log.CaretIndex = log.Text?.Length ?? 0;
-                }
-            });
-        }
-
-        private void UpdateProgress(int val, int total)
-        {
-            Dispatcher.UIThread.Post(() =>
-            {
-                var pb = this.FindControl<ProgressBar>("ProgressBar");
-                if (pb == null) return;
-
-                try
-                {
-                    int t = Math.Max(1, total);
-                    pb.Maximum = t;
-                    pb.Value = Math.Min(Math.Max(0, val), t);
-                }
-                catch (ArgumentOutOfRangeException)
-                {
-                    // Ignore progress bar range errors
-                }
-            });
-        }
-
-        private void SetStatus(string text)
-        {
-            Dispatcher.UIThread.Post(() =>
-            {
-                var lbl = this.FindControl<TextBlock>("StatusLabel");
-                if (lbl != null) lbl.Text = text;
-            });
-        }
-
-        #endregion
-
-        #region Archive operations (port of your logic)
-
-        private async void NewArchive()
-        {
-            try
-            {
-                string? file = await SelectSaveFileAsync().ConfigureAwait(false);
-                if (string.IsNullOrEmpty(file)) return;
-                archivePath = file;
-                entries = new Collection<Entry>();
-                srcFolder = null;
-                filetype = archivePath.EndsWith(".msnd", StringComparison.OrdinalIgnoreCase) ? ArchiveType.MSND : ArchiveType.DSARC;
-                archiveOpenedFromDisk = false;
-                RefreshTree();
-                SetStatus("New archive created");
-                AppendLog($"Created new {filetype} archive: {Path.GetFileName(archivePath)}");
-            }
-            catch (Exception ex)
-            {
-                await ShowErrorAsync($"Failed to create new archive: {ex.Message}");
-            }
-        }
-
-        // Update the OpenArchiveAsync method to use the archive filter
-        private async Task OpenArchiveAsync(IArchiveService archiveService)
-        {
-            try
-            {
-                // Use the archive filter for opening files
-                string? file = await SelectFileAsync("Disgaea DS Archives (*.dat, *.msnd)|*.dat;*.msnd").ConfigureAwait(false);
-                if (file == null) return;
-                archivePath = file;
-
-                _cts?.Cancel();
-                _cts = new CancellationTokenSource();
-                CancellationToken ct = _cts.Token;
-                entries = await _archiveService.LoadArchiveAsync(archivePath, ct).ConfigureAwait(false);
-                filetype = Detector.FromFile(archivePath);
-                archiveOpenedFromDisk = true;
-                RefreshTree();
-                SetStatus($"Opened {Path.GetFileName(archivePath)}");
-                AppendLog($"Opened {Path.GetFileName(archivePath)} as {filetype.ToString().ToUpper(CultureInfo.InvariantCulture)}");
-            }
-            catch (OperationCanceledException)
-            {
-                AppendLog("Open archive cancelled.");
-            }
-            catch (IOException io)
-            {
-                await ShowErrorAsync($"Failed to open archive: {io.Message}");
-            }
-            catch (UnauthorizedAccessException ua)
-            {
-                await ShowErrorAsync($"Access denied: {ua.Message}");
-            }
-            catch (Exception ex)
-            {
-                await ShowErrorAsync($"Failed to open archive: {ex.Message}");
-            }
-            finally
-            {
-                _cts = null;
-            }
-        }
-
-        // In MainWindow.axaml.cs - Fix the SaveArchiveAsync method to handle embedded MSND replacements
-        private async Task SaveArchiveAsync()
-        {
-            try
-            {
-                if (archivePath == null)
-                {
-                    await SaveAsAsync().ConfigureAwait(false);
-                    return;
-                }
-                if (entries?.Count == 0)
-                {
-                    await ShowWarningAsync("No files in archive to save.");
-                    return;
-                }
-
-                // Handle the case where srcFolder might be null but we have embedded MSND replacements
-                if (srcFolder == null && !archiveOpenedFromDisk)
-                {
-                    // Check if we have any embedded MSND entries that might need source files
-                    bool hasEmbeddedMsnd = entries.Any(e => e.IsMsnd && e.Children.Count > 0);
-                    if (hasEmbeddedMsnd)
-                    {
-                        await ShowWarningAsync("Cannot save archive with embedded MSND replacements without a source folder. Please set a source folder first.");
-                        return;
-                    }
-
-                    // For simple archives without embedded content, use a temporary approach
-                    string? tempFolder = await SelectFolderAsync("Select temporary folder for archive contents");
-                    if (tempFolder == null) return;
-                    srcFolder = tempFolder;
-                }
-
-                _cts?.Cancel();
-                _cts = new CancellationTokenSource();
-                CancellationToken ct = _cts.Token;
-                Progress<(int current, int total)> progress = new(t => UpdateProgress(t.current, t.total));
-
-                // Pass original archive path for hybrid saving
-                string? originalArchivePath = archiveOpenedFromDisk ? this.archivePath : null;
-
-                await _archiveService.SaveArchiveAsync(archivePath, filetype!.Value, entries.ToList(),
-                    srcFolder ?? string.Empty, progress, ct, originalArchivePath).ConfigureAwait(false);
-
-                SetStatus(filetype == ArchiveType.MSND ? "MSND saved" : "DSARC saved");
-                AppendLog($"{filetype.ToString().ToUpper(CultureInfo.InvariantCulture)} saved.");
-            }
-            catch (OperationCanceledException)
-            {
-                AppendLog("Save cancelled.");
-            }
-            catch (IOException io)
-            {
-                await ShowErrorAsync($"Failed to save archive: {io.Message}");
-            }
-            catch (UnauthorizedAccessException ua)
-            {
-                await ShowErrorAsync($"Access denied: {ua.Message}");
-            }
-            catch (Exception ex)
-            {
-                await ShowErrorAsync($"Failed to save archive: {ex.Message}");
-            }
-            finally
-            {
-                _cts = null;
-                UpdateProgress(0, 1);
-            }
-        }
-
-        private async Task SaveAsAsync()
+        });
+    }
+    #endregion
+    #region Archive Operations
+    [Obsolete]
+    private async void NewArchive()
+    {
+        try
         {
             string? file = await SelectSaveFileAsync().ConfigureAwait(false);
-            if (file == null) return;
-            archivePath = file;
-            await SaveArchiveAsync().ConfigureAwait(false);
-        }
-
-        private void RefreshTree()
-        {
-            Dispatcher.UIThread.Post(() =>
+            if (string.IsNullOrEmpty(file))
             {
-                var tree = this.FindControl<TreeView>("TreeView");
-                if (tree == null) return;
-
-                string rootText = archivePath != null ? Path.GetFileName(archivePath) : "[New Archive]";
-                rootItem = new TreeViewItem { Header = rootText, DataContext = null, IsExpanded = true };
-
-                // Create child items for the root
-                var rootChildren = new AvaloniaList<TreeViewItem>();
-
-                if (filetype == ArchiveType.DSARC)
-                {
-                    foreach (Entry e in entries)
-                    {
-                        if (e.IsMsnd && e.Children?.Count > 0)
-                        {
-                            var msNode = new TreeViewItem { Header = e.Path.Name, DataContext = e, IsExpanded = true };
-                            var childList = new AvaloniaList<TreeViewItem>();
-                            foreach (Entry c in e.Children)
-                            {
-                                childList.Add(new TreeViewItem { Header = c.Path.Name, DataContext = c });
-                            }
-                            // set the child items via ItemsSourceProperty (not ItemsProperty)
-                            msNode.SetValue(ItemsControl.ItemsSourceProperty, childList);
-                            rootChildren.Add(msNode);
-                        }
-                        else
-                        {
-                            rootChildren.Add(new TreeViewItem { Header = e.Path.Name, DataContext = e });
-                        }
-                    }
-                }
-                else if (filetype == ArchiveType.MSND)
-                {
-                    foreach (Entry e in entries)
-                    {
-                        rootChildren.Add(new TreeViewItem { Header = e.Path.Name, DataContext = e });
-                    }
-                }
-
-                // Set the root item's children
-                rootItem.SetValue(ItemsControl.ItemsSourceProperty, rootChildren);
-
-                // Create the main items list with just the root
-                var allItems = new AvaloniaList<TreeViewItem> { rootItem };
-
-                // set items via ItemsSourceProperty (Items is read-only)
-                tree.SetValue(ItemsControl.ItemsSourceProperty, allItems);
-
-                // Update context menu visibility for current selection
-                UpdateContextMenuVisibility(tree.SelectedItem);
-            });
-        }
-
-
-        #endregion
-
-        #region Tree & Context menu
-
-        private void TreeView_SelectionChanged(object? sender, SelectionChangedEventArgs e)
-        {
-            var tree = this.FindControl<TreeView>("TreeView");
-            if (tree == null) return;
-
-            var selectedItem = tree.SelectedItem;
-            UpdateContextMenuVisibility(selectedItem);
-        }
-
-        private void TreeView_PointerReleased(object? sender, PointerReleasedEventArgs e)
-        {
-            if (e.InitialPressMouseButton != MouseButton.Right) return;
-
-            var tree = this.FindControl<TreeView>("TreeView");
-            if (tree == null) return;
-
-            var selectedItem = tree.SelectedItem;
-            if (selectedItem is TreeViewItem treeViewItem)
-            {
-                ShowContextMenu(treeViewItem);
-                e.Handled = true;
+                return;
             }
+
+            _archivePath = file;
+            _entries = [];
+            _srcFolder = null;
+            _filetype = _archivePath.EndsWith(".msnd", StringComparison.OrdinalIgnoreCase) ? ArchiveType.MSND : ArchiveType.DSARC;
+            _archiveOpenedFromDisk = false;
+            RefreshTree();
+            SetStatus("New archive created");
+            AppendLog($"Created new {_filetype} archive: {Path.GetFileName(_archivePath)}");
         }
-
-        private void UpdateContextMenuVisibility(object? selectedItem)
+        catch (Exception ex)
         {
-            // This method is no longer needed with dynamic context menu creation
-            // The context menu items are created dynamically in ShowContextMenu method
+            await ShowErrorAsync($"Failed to create new archive: {ex.Message}");
         }
-
-        private void ShowContextMenu(TreeViewItem node)
+    }
+    [Obsolete]
+    private async Task OpenArchiveAsync()
+    {
+        try
         {
-            var menu = new ContextMenu();
-            var items = new AvaloniaList<MenuItem>();
-            bool isRoot = node == rootItem;
-
-            if (isRoot)
+            string? file = await SelectFileAsync("Disgaea DS Archives (*.dat, *.msnd)|*.dat;*.msnd").ConfigureAwait(false);
+            if (file is null)
             {
-                var miImport = new MenuItem { Header = "Import Folder" };
-                miImport.Click += async (_, __) => await ImportFolderAsync().ConfigureAwait(false);
-                items.Add(miImport);
+                return;
+            }
 
-                var miExtractAll = new MenuItem { Header = "Extract All" };
-                miExtractAll.Click += async (_, __) => await ExtractAllAsync().ConfigureAwait(false);
-                items.Add(miExtractAll);
+            _archivePath = file;
+            _cts?.Cancel();
+            _cts = new CancellationTokenSource();
+            _entries = await _archiveService.LoadArchiveAsync(_archivePath, _cts.Token).ConfigureAwait(false);
+            _filetype = Detector.FromFile(_archivePath);
+            _archiveOpenedFromDisk = true;
+            RefreshTree();
+            SetStatus($"Opened {Path.GetFileName(_archivePath)}");
+            AppendLog($"Opened {Path.GetFileName(_archivePath)} as {_filetype.ToString().ToUpper(CultureInfo.InvariantCulture)}");
+        }
+        catch (OperationCanceledException) { AppendLog("Open archive cancelled."); }
+        catch (Exception ex) { await ShowErrorAsync($"Failed to open archive: {ex.Message}"); }
+        finally { _cts = null; }
+    }
+    [Obsolete]
+    private async Task SaveArchiveAsync()
+    {
+        try
+        {
+            if (_archivePath is null)
+            {
+                await SaveAsAsync().ConfigureAwait(false);
+                return;
+            }
+            if (_entries?.Count == 0)
+            {
+                await ShowWarningAsync("No files in archive to save.");
+                return;
+            }
+            if (_srcFolder is null && !_archiveOpenedFromDisk && HasEmbeddedMsnd())
+            {
+                await ShowWarningAsync("Cannot save archive with embedded MSND replacements without a source folder.");
+                return;
+            }
+            _srcFolder ??= await SelectFolderAsync("Select temporary folder for archive contents");
+            if (_srcFolder is null)
+            {
+                return;
+            }
 
-                if (filetype == ArchiveType.DSARC)
-                {
-                    var miNested = new MenuItem { Header = "Extract All (Nested)" };
-                    miNested.Click += async (_, __) => await ExtractAllNestedRootAsync().ConfigureAwait(false);
-                    items.Add(miNested);
-                }
+            _cts?.Cancel();
+            _cts = new CancellationTokenSource();
+            Progress<(int current, int total)> progress = new(t => UpdateProgress(t.current, t.total));
+            string? originalArchivePath = _archiveOpenedFromDisk ? _archivePath : null;
+            await _archiveService.SaveArchiveAsync(_archivePath, _filetype!.Value, _entries.ToList(),
+                _srcFolder, progress, _cts.Token, originalArchivePath).ConfigureAwait(false);
+            SetStatus(_filetype == ArchiveType.MSND ? "MSND saved" : "DSARC saved");
+            AppendLog($"{_filetype.ToString().ToUpper(CultureInfo.InvariantCulture)} saved.");
+        }
+        catch (OperationCanceledException) { AppendLog("Save cancelled."); }
+        catch (Exception ex) { await ShowErrorAsync($"Failed to save archive: {ex.Message}"); }
+        finally { _cts = null; UpdateProgress(0, 1); }
+    }
+    private bool HasEmbeddedMsnd()
+    {
+        return _entries?.Any(e => e.IsMsnd && e.Children.Count > 0) == true;
+    }
+
+    [Obsolete]
+    private async Task SaveAsAsync()
+    {
+        string? file = await SelectSaveFileAsync().ConfigureAwait(false);
+        if (file is null)
+        {
+            return;
+        }
+
+        _archivePath = file;
+        await SaveArchiveAsync().ConfigureAwait(false);
+    }
+    private void RefreshTree()
+    {
+        Dispatcher.UIThread.Post(() =>
+        {
+            if (this.FindControl<TreeView>("TreeView") is not { } tree)
+            {
+                return;
+            }
+
+            string rootText = _archivePath != null ? Path.GetFileName(_archivePath) : "[New Archive]";
+            _rootItem = new TreeViewItem { Header = rootText, DataContext = null, IsExpanded = true };
+            AvaloniaList<TreeViewItem> rootChildren = [];
+            if (_filetype.HasValue)
+            {
+                rootChildren.AddRange(_filetype.Value == ArchiveType.DSARC
+                    ? CreateDsarcTreeItems()
+                    : CreateMsndTreeItems());
+            }
+            _ = _rootItem.SetValue(ItemsControl.ItemsSourceProperty, rootChildren);
+            _ = tree.SetValue(ItemsControl.ItemsSourceProperty, new AvaloniaList<TreeViewItem> { _rootItem });
+            UpdateContextMenuVisibility(tree.SelectedItem);
+        });
+    }
+    private IEnumerable<TreeViewItem> CreateDsarcTreeItems()
+    {
+        foreach (Entry e in _entries)
+        {
+            if (e.IsMsnd && e.Children.Count > 0)
+            {
+                TreeViewItem msNode = new() { Header = e.Path.Name, DataContext = e, IsExpanded = true };
+                AvaloniaList<TreeViewItem> childList = [.. e.Children.Select(c => new TreeViewItem { Header = c.Path.Name, DataContext = c })];
+                _ = msNode.SetValue(ItemsControl.ItemsSourceProperty, childList);
+                yield return msNode;
             }
             else
             {
-                var nodeEntry = node.DataContext as Entry;
-                bool nodeHasChildren = node.Items != null && node.Items.Cast<object>().Any();
-
-                if (nodeHasChildren && nodeEntry != null && nodeEntry.IsMsnd)
-                {
-                    var mi = new MenuItem { Header = "Import Folder" };
-                    mi.Click += async (_, __) => await ImportFolderToNodeAsync().ConfigureAwait(false);
-                    items.Add(mi);
-
-                    var mi2 = new MenuItem { Header = "Extract All" };
-                    mi2.Click += async (_, __) => await ExtractAllFromNodeAsync().ConfigureAwait(false);
-                    items.Add(mi2);
-
-                    var mi3 = new MenuItem { Header = "Extract All Nested" };
-                    mi3.Click += async (_, __) => await ExtractAllNestedFromNodeAsync().ConfigureAwait(false);
-                    items.Add(mi3);
-                }
-
-                if (filetype == ArchiveType.DSARC)
-                {
-                    if (node.Parent == rootItem)
-                    {
-                        var mi = new MenuItem { Header = "Extract" };
-                        mi.Click += async (_, __) => await ExtractItemAsync().ConfigureAwait(false);
-                        items.Add(mi);
-                        var rep = new MenuItem { Header = "Replace" };
-                        rep.Click += async (_, __) => await ReplaceItemAsync().ConfigureAwait(false);
-                        items.Add(rep);
-                    }
-                    else if (node.Parent != null)
-                    {
-                        var mi = new MenuItem { Header = "Extract (chunk)" };
-                        mi.Click += async (_, __) => await ExtractChunkItemAsync().ConfigureAwait(false);
-                        items.Add(mi);
-                        var rep = new MenuItem { Header = "Replace (chunk)" };
-                        rep.Click += async (_, __) => await ReplaceChunkItemAsync().ConfigureAwait(false);
-                        items.Add(rep);
-                    }
-                }
-                else if (filetype == ArchiveType.MSND)
-                {
-                    var mi = new MenuItem { Header = "Extract" };
-                    mi.Click += async (_, __) => await ExtractItemAsync().ConfigureAwait(false);
-                    items.Add(mi);
-                    var rep = new MenuItem { Header = "Replace" };
-                    rep.Click += async (_, __) => await ReplaceItemAsync().ConfigureAwait(false);
-                    items.Add(rep);
-                }
-            }
-
-            // use ItemsSourceProperty instead of assigning Items
-            menu.SetValue(ItemsControl.ItemsSourceProperty, items);
-            menu.PlacementTarget = node;
-            menu.Open(node);
-        }
-
-        #endregion
-
-        #region Import/Export/Replace methods (delegating to _archiveService)
-
-        private async Task ImportFolderAsync()
-        {
-            string? folder = await SelectFolderAsync("Select folder to import").ConfigureAwait(false);
-            if (folder == null) return;
-            try
-            {
-                _cts?.Cancel();
-                _cts = new CancellationTokenSource();
-                var ct = _cts.Token;
-                var result = await _archiveService.InspectFolderForImportAsync(folder, ct).ConfigureAwait(false);
-                if (result?.Entries == null || result.Entries.Count == 0)
-                {
-                    await ShowWarningAsync("No files found to import");
-                    return;
-                }
-                entries = result.Entries;
-                filetype = result.FileType;
-                srcFolder = result.SourceFolder;
-                RefreshTree();
-                SetStatus("Folder imported");
-                AppendLog("Folder imported (nested-aware).");
-            }
-            catch (OperationCanceledException)
-            {
-                AppendLog("Import folder cancelled.");
-            }
-            catch (IOException io)
-            {
-                await ShowErrorAsync(io.Message);
-            }
-            catch (UnauthorizedAccessException ua)
-            {
-                await ShowErrorAsync(ua.Message);
-            }
-            finally
-            {
-                _cts = null;
+                yield return new TreeViewItem { Header = e.Path.Name, DataContext = e };
             }
         }
-
-        private async Task ExtractAllAsync()
+    }
+    private IEnumerable<TreeViewItem> CreateMsndTreeItems()
+    {
+        return _entries.Select(e => new TreeViewItem { Header = e.Path.Name, DataContext = e });
+    }
+    #endregion
+    #region Tree & Context Menu
+    private void TreeView_SelectionChanged(object? sender, SelectionChangedEventArgs e)
+    {
+        if (this.FindControl<TreeView>("TreeView") is { } tree)
         {
-            if (archivePath == null || filetype == null)
+            UpdateContextMenuVisibility(tree.SelectedItem);
+        }
+    }
+    [Obsolete]
+    private void TreeView_PointerReleased(object? sender, PointerReleasedEventArgs e)
+    {
+        if (e.InitialPressMouseButton != MouseButton.Right)
+        {
+            return;
+        }
+
+        if (this.FindControl<TreeView>("TreeView") is { } tree && tree.SelectedItem is TreeViewItem treeViewItem)
+        {
+            ShowContextMenu(treeViewItem);
+            e.Handled = true;
+        }
+    }
+    private void UpdateContextMenuVisibility(object? selectedItem) { }
+    [Obsolete]
+    private void ShowContextMenu(TreeViewItem node)
+    {
+        ContextMenu menu = new();
+        AvaloniaList<MenuItem> items = [];
+        bool isRoot = node == _rootItem;
+        if (isRoot)
+        {
+            items.Add(CreateMenuItem("Import Folder", ImportFolderAsync));
+            items.Add(CreateMenuItem("Extract All", ExtractAllAsync));
+            if (_filetype == ArchiveType.DSARC)
             {
-                await ShowWarningAsync("Open archive first");
+                items.Add(CreateMenuItem("Extract All (Nested)", ExtractAllNestedRootAsync));
+            }
+        }
+        else
+        {
+            bool nodeHasChildren = node.Items?.Cast<object>().Any() == true;
+            if (nodeHasChildren && node.DataContext is Entry { IsMsnd: true } entry)
+            {
+                items.Add(CreateMenuItem("Import Folder", async () => await ImportFolderToNodeAsync(entry)));
+                items.Add(CreateMenuItem("Extract All", async () => await ExtractAllFromNodeAsync(entry)));
+                items.Add(CreateMenuItem("Extract All Nested", async () => await ExtractAllNestedFromNodeAsync(entry)));
+            }
+            if (_filetype == ArchiveType.DSARC)
+            {
+                if (node.Parent == _rootItem)
+                {
+                    items.Add(CreateMenuItem("Extract", async () => await ExtractItemAsync(node)));
+                    items.Add(CreateMenuItem("Replace", async () => await ReplaceItemAsync(node)));
+                }
+                else if (node.Parent != null)
+                {
+                    items.Add(CreateMenuItem("Extract (chunk)", async () => await ExtractChunkItemAsync(node)));
+                    items.Add(CreateMenuItem("Replace (chunk)", async () => await ReplaceChunkItemAsync(node)));
+                }
+            }
+            else if (_filetype == ArchiveType.MSND)
+            {
+                items.Add(CreateMenuItem("Extract", async () => await ExtractItemAsync(node)));
+                items.Add(CreateMenuItem("Replace", async () => await ReplaceItemAsync(node)));
+            }
+        }
+        _ = menu.SetValue(ItemsControl.ItemsSourceProperty, items);
+        menu.PlacementTarget = node;
+        menu.Open(node);
+    }
+    private MenuItem CreateMenuItem(string header, Func<Task> action)
+    {
+        MenuItem menuItem = new() { Header = header };
+        menuItem.Click += async (s, e) => await action();
+        return menuItem;
+    }
+    #endregion
+    #region Import/Export/Replace Methods (Complete Implementation)
+    [Obsolete]
+    private async Task ImportFolderAsync()
+    {
+        string? folder = await SelectFolderAsync("Select folder to import").ConfigureAwait(false);
+        if (folder is null)
+        {
+            return;
+        }
+
+        try
+        {
+            _cts?.Cancel();
+            _cts = new CancellationTokenSource();
+            ImportResult result = await _archiveService.InspectFolderForImportAsync(folder, _cts.Token).ConfigureAwait(false);
+            if (result?.Entries == null || result.Entries.Count == 0)
+            {
+                await ShowWarningAsync("No files found to import");
                 return;
             }
-            string? dlgFolder = await SelectFolderAsync("Choose output folder for Extract All").ConfigureAwait(false);
-            if (dlgFolder == null) return;
-
-            try
-            {
-                _cts?.Cancel();
-                _cts = new CancellationTokenSource();
-                var ct = _cts.Token;
-                Progress<(int current, int total)> progress = new(t => UpdateProgress(t.current, t.total));
-                var result = await _archiveService.ExtractAllAsync(archivePath, filetype.Value, dlgFolder, progress, ct).ConfigureAwait(false);
-                AppendLog($"Starting Extract All -> {result.outBase}");
-                SetStatus("Extract complete");
-                AppendLog("Extract All complete.");
-            }
-            catch (OperationCanceledException)
-            {
-                AppendLog("Extract All cancelled.");
-            }
-            catch (IOException io)
-            {
-                await ShowErrorAsync(io.Message);
-            }
-            catch (UnauthorizedAccessException ua)
-            {
-                await ShowErrorAsync(ua.Message);
-            }
-            finally
-            {
-                _cts = null;
-                UpdateProgress(0, 1);
-            }
+            _entries = result.Entries;
+            _filetype = result.FileType;
+            _srcFolder = result.SourceFolder;
+            RefreshTree();
+            SetStatus("Folder imported");
+            AppendLog("Folder imported (nested-aware).");
+        }
+        catch (OperationCanceledException) { AppendLog("Import folder cancelled."); }
+        catch (Exception ex) { await ShowErrorAsync(ex.Message); }
+        finally { _cts = null; }
+    }
+    [Obsolete]
+    private async Task ExtractAllAsync()
+    {
+        if (_archivePath is null || _filetype is null)
+        {
+            await ShowWarningAsync("Open archive first");
+            return;
+        }
+        string? destFolder = await SelectFolderAsync("Choose output folder for Extract All").ConfigureAwait(false);
+        if (destFolder is null)
+        {
+            return;
         }
 
-        private async Task ExtractItemAsync()
+        try
         {
-            var tree = this.FindControl<TreeView>("TreeView");
-            if (tree?.SelectedItem is not TreeViewItem node) { await ShowWarningAsync("Invalid selection"); return; }
-
-            if (rootItem == null) { await ShowWarningAsync("Invalid selection"); return; }
-
-            int idx = -1;
-            if (rootItem.Items != null)
-            {
-                var list = rootItem.Items.Cast<TreeViewItem>().ToList();
-                idx = list.IndexOf(node);
-            }
-            if (idx < 0 || idx >= entries.Count) { await ShowWarningAsync("Invalid selection"); return; }
-
-            Entry e = entries[idx];
-            string? dest = await SelectFolderAsync("Select folder to extract to").ConfigureAwait(false);
-            if (dest == null) return;
-
-            try
-            {
-                _cts?.Cancel();
-                _cts = new CancellationTokenSource();
-                await _archiveService.ExtractItemAsync(archivePath!, filetype!.Value, e, dest, _cts.Token).ConfigureAwait(false);
-                SetStatus(string.Format(CultureInfo.InvariantCulture, "Extracted {0}", e.Path.Name));
-                AppendLog($"Extracted {e.Path.Name} ({e.Size} bytes)");
-            }
-            catch (OperationCanceledException)
-            {
-                AppendLog("Extract item cancelled.");
-            }
-            catch (IOException io)
-            {
-                await ShowErrorAsync(io.Message);
-            }
-            catch (UnauthorizedAccessException ua)
-            {
-                await ShowErrorAsync(ua.Message);
-            }
-            finally
-            {
-                _cts = null;
-            }
+            _cts?.Cancel();
+            _cts = new CancellationTokenSource();
+            Progress<(int current, int total)> progress = new(t => UpdateProgress(t.current, t.total));
+            (string outBase, List<string> mapperLines) = await _archiveService.ExtractAllAsync(_archivePath, _filetype.Value, destFolder, progress, _cts.Token).ConfigureAwait(false);
+            AppendLog($"Starting Extract All -> {outBase}");
+            SetStatus("Extract complete");
+            AppendLog("Extract All complete.");
+        }
+        catch (OperationCanceledException) { AppendLog("Extract All cancelled."); }
+        catch (Exception ex) { await ShowErrorAsync(ex.Message); }
+        finally { _cts = null; UpdateProgress(0, 1); }
+    }
+    [Obsolete]
+    private async Task ExtractItemAsync(TreeViewItem node)
+    {
+        if (_rootItem is null) { await ShowWarningAsync("Invalid selection"); return; }
+        Entry? entry = GetEntryFromNode(node);
+        if (entry is null) { await ShowWarningAsync("Invalid selection"); return; }
+        string? dest = await SelectFolderAsync("Select folder to extract to").ConfigureAwait(false);
+        if (dest is null)
+        {
+            return;
         }
 
-        private async Task ReplaceItemAsync()
+        try
         {
-            var tree = this.FindControl<TreeView>("TreeView");
-            if (tree?.SelectedItem is not TreeViewItem node) { await ShowWarningAsync("Invalid selection"); return; }
-
-            if (rootItem == null) { await ShowWarningAsync("Invalid selection"); return; }
-
-            int idx = -1;
-            if (rootItem.Items != null)
-            {
-                var list = rootItem.Items.Cast<TreeViewItem>().ToList();
-                idx = list.IndexOf(node);
-            }
-            if (idx < 0 || idx >= entries.Count) { await ShowWarningAsync("Invalid selection"); return; }
-
-            string? replacement = await SelectFileAsync().ConfigureAwait(false);
-            if (replacement == null) return;
-
-            try
-            {
-                if (filetype == ArchiveType.MSND && !Msnd.MSNDORDER.Contains(Path.GetExtension(replacement).ToLowerInvariant()))
-                {
-                    await ShowWarningAsync("Replacement must be sseq/sbnk/swar");
-                    return;
-                }
-
-                // For MSND replacements, ensure the file is copied to the source folder
-                if (filetype == ArchiveType.MSND)
-                {
-                    // Set srcFolder if not already set
-                    if (string.IsNullOrEmpty(srcFolder))
-                    {
-                        srcFolder = Path.GetDirectoryName(replacement);
-                        if (string.IsNullOrEmpty(srcFolder))
-                        {
-                            await ShowErrorAsync("Cannot determine source folder");
-                            return;
-                        }
-                    }
-
-                    // Copy the replacement file to the source folder
-                    string targetPath = Path.Combine(srcFolder, Path.GetFileName(replacement));
-                    if (!string.Equals(replacement, targetPath, StringComparison.OrdinalIgnoreCase))
-                    {
-                        File.Copy(replacement, targetPath, true);
-                    }
-
-                    // Update the entry to point to the new file
-                    entries[idx].Path = new FileInfo(Path.GetFileName(replacement));
-                }
-                else
-                {
-                    // For DSARC, use the original logic
-                    srcFolder ??= Path.GetDirectoryName(replacement);
-                    await _archiveService.CopyFileToFolderAsync(replacement, srcFolder!, CancellationToken.None).ConfigureAwait(false);
-                    entries[idx].Path = new FileInfo(Path.GetFileName(replacement));
-                }
-
-                RefreshTree();
-                SetStatus("File replaced");
-                AppendLog($"Replaced file with: {Path.GetFileName(replacement)}");
-            }
-            catch (IOException io)
-            {
-                await ShowErrorAsync(io.Message);
-            }
-            catch (UnauthorizedAccessException ua)
-            {
-                await ShowErrorAsync(ua.Message);
-            }
+            _cts?.Cancel();
+            _cts = new CancellationTokenSource();
+            await _archiveService.ExtractItemAsync(_archivePath!, _filetype!.Value, entry, dest, _cts.Token).ConfigureAwait(false);
+            SetStatus($"Extracted {entry.Path.Name}");
+            AppendLog($"Extracted {entry.Path.Name} ({entry.Size} bytes)");
+        }
+        catch (OperationCanceledException) { AppendLog("Extract item cancelled."); }
+        catch (Exception ex) { await ShowErrorAsync(ex.Message); }
+        finally { _cts = null; }
+    }
+    [Obsolete]
+    private async Task ReplaceItemAsync(TreeViewItem node)
+    {
+        if (_rootItem is null) { await ShowWarningAsync("Invalid selection"); return; }
+        Entry? entry = GetEntryFromNode(node);
+        if (entry is null) { await ShowWarningAsync("Invalid selection"); return; }
+        string? replacement = await SelectFileAsync().ConfigureAwait(false);
+        if (replacement is null)
+        {
+            return;
         }
 
-        private async Task ExtractChunkItemAsync()
+        try
         {
-            var tree = this.FindControl<TreeView>("TreeView");
-            if (tree?.SelectedItem is not TreeViewItem node) { await ShowWarningAsync("Invalid selection"); return; }
-
-            var parent = node.Parent as TreeViewItem;
-            if (parent?.DataContext is not Entry parentEntry) { await ShowWarningAsync("Invalid parent"); return; }
-            if (node.DataContext is not Entry chunkEntry) { await ShowWarningAsync("Invalid chunk"); return; }
-            string? dest = await SelectFolderAsync("Select folder to extract chunk to").ConfigureAwait(false);
-            if (dest == null) return;
-
-            try
+            if (_filetype == ArchiveType.MSND && !Msnd.MSND_ORDER.Contains(Path.GetExtension(replacement).ToLowerInvariant()))
             {
-                _cts?.Cancel();
-                _cts = new CancellationTokenSource();
-                await _archive_service_ExtractChunkAsync(archivePath!, parentEntry, chunkEntry, dest, _cts.Token).ConfigureAwait(false);
-                SetStatus(string.Format(CultureInfo.InvariantCulture, "Extracted {0}", chunkEntry.Path.Name));
-                AppendLog($"Extracted {chunkEntry.Path.Name} ({chunkEntry.Size} bytes)");
-            }
-            catch (OperationCanceledException)
-            {
-                AppendLog("Extract chunk cancelled.");
-            }
-            catch (IOException io)
-            {
-                await ShowErrorAsync(io.Message);
-            }
-            catch (UnauthorizedAccessException ua)
-            {
-                await ShowErrorAsync(ua.Message);
-            }
-            finally
-            {
-                _cts = null;
-            }
-        }
-
-        // small adapter to call IArchiveService extract chunk
-        private Task _archive_service_ExtractChunkAsync(string archivePath, Entry parentEntry, Entry chunkEntry, string dest, CancellationToken ct)
-            => _archiveService.ExtractChunkItemAsync(archivePath, parentEntry, chunkEntry, dest, ct);
-
-        // In MainWindow.axaml.cs - Fix the ReplaceChunkItemAsync method
-        // In MainWindow.axaml.cs - Fix the ReplaceChunkItemAsync method
-        private async Task<byte[]> ReplaceChunkItemAsync()
-        {
-            var tree = this.FindControl<TreeView>("TreeView");
-            if (tree?.SelectedItem is not TreeViewItem node)
-            {
-                await ShowWarningAsync("Invalid selection");
-                return Array.Empty<byte>();
-            }
-
-            var parent = node.Parent as TreeViewItem;
-            if (parent?.DataContext is not Entry parentEntry)
-            {
-                await ShowWarningAsync("Invalid parent");
-                return Array.Empty<byte>();
-            }
-            if (node.DataContext is not Entry chunkEntry)
-            {
-                await ShowWarningAsync("Invalid chunk");
-                return Array.Empty<byte>();
-            }
-
-            string? replacement = await SelectFileAsync().ConfigureAwait(false);
-            if (replacement == null) return Array.Empty<byte>();
-
-            try
-            {
-                _cts?.Cancel();
-                _cts = new CancellationTokenSource();
-
-                // For embedded MSND replacements, we need to ensure the MSND file exists in srcFolder
-                // If it doesn't exist, we need to extract it first or create the directory structure
-                if (string.IsNullOrEmpty(srcFolder))
-                {
-                    // If no srcFolder is set, use the directory of the replacement file
-                    srcFolder = Path.GetDirectoryName(replacement);
-                    if (string.IsNullOrEmpty(srcFolder))
-                    {
-                        await ShowErrorAsync("Cannot determine source folder for replacement");
-                        return Array.Empty<byte>();
-                    }
-                }
-
-                // Ensure the MSND file exists in the source folder
-                string msndTargetPath = Path.Combine(srcFolder, parentEntry.Path.Name);
-                if (!File.Exists(msndTargetPath))
-                {
-                    // Extract the current MSND to the source folder so we have a base to modify
-                    await _archiveService.ExtractItemAsync(archivePath!, ArchiveType.DSARC, parentEntry, srcFolder, _cts.Token);
-                    AppendLog($"Extracted base MSND file to {msndTargetPath} for modification");
-                }
-
-                byte[] rebuilt = await _archiveService.ReplaceChunkItemAsync(
-                    archivePath!, parentEntry, chunkEntry, replacement, srcFolder, _cts.Token).ConfigureAwait(false);
-
-                // Update the parent entry with the new MSND structure
-                parentEntry.Children.Clear();
-                foreach (Entry child in Msnd.Parse(rebuilt, Path.GetFileNameWithoutExtension(parentEntry.Path.Name)))
-                    parentEntry.Children.Add(child);
-
-                RefreshTree();
-                SetStatus("File replaced - use Save");
-                AppendLog($"Rebuilt embedded MSND {parentEntry.Path.Name} after replacing {Path.GetExtension(chunkEntry.Path.Name)}");
-                return rebuilt;
-            }
-            catch (OperationCanceledException)
-            {
-                AppendLog("Replace chunk cancelled.");
-                return Array.Empty<byte>();
-            }
-            catch (IOException io)
-            {
-                await ShowErrorAsync(io.Message);
-                return Array.Empty<byte>();
-            }
-            catch (UnauthorizedAccessException ua)
-            {
-                await ShowErrorAsync(ua.Message);
-                return Array.Empty<byte>();
-            }
-            finally
-            {
-                _cts = null;
-            }
-        }
-
-        private async Task ExtractAllFromNodeAsync()
-        {
-            var tree = this.FindControl<TreeView>("TreeView");
-            if (tree?.SelectedItem is not TreeViewItem node) { await ShowWarningAsync("Invalid selection"); return; }
-
-            if (node.DataContext is not Entry entry || !entry.IsMsnd)
-            {
-                await ShowWarningAsync("Selection is not an embedded archive");
+                await ShowWarningAsync("Replacement must be sseq/sbnk/swar");
                 return;
             }
-            string? dest = await SelectFolderAsync("Select root folder for extraction").ConfigureAwait(false);
-            if (dest == null) return;
-
-            try
+            if (_filetype == ArchiveType.MSND)
             {
-                _cts?.Cancel();
-                _cts = new CancellationTokenSource();
-                CancellationToken ct = _cts.Token;
-                string outDir = Path.Combine(dest, Path.GetFileNameWithoutExtension(entry.Path.Name));
-                Directory.CreateDirectory(outDir);
-                byte[] msndBuf = await _archiveService.ReadRangeAsync(archivePath, entry.Offset, entry.Size, ct).ConfigureAwait(false);
-                Progress<(int current, int total)> progress = new(t => UpdateProgress(t.current, t.total));
-                await _archive_service_NestedExtractBufferAsync(msndBuf, outDir, Path.GetFileNameWithoutExtension(entry.Path.Name), progress, ct).ConfigureAwait(false);
-
-                if (entry.Children.Count == 0)
+                if (string.IsNullOrEmpty(_srcFolder))
                 {
-                    foreach (Entry child in Msnd.Parse(msndBuf, Path.GetFileNameWithoutExtension(entry.Path.Name)))
+                    _srcFolder = Path.GetDirectoryName(replacement);
+                    if (string.IsNullOrEmpty(_srcFolder))
                     {
-                        entry.Children.Add(child);
+                        await ShowErrorAsync("Cannot determine source folder");
+                        return;
                     }
                 }
-                RefreshTree();
-                SetStatus("Extract complete");
-                AppendLog("Extract complete.");
+                string targetPath = Path.Combine(_srcFolder, Path.GetFileName(replacement));
+                if (!string.Equals(replacement, targetPath, StringComparison.OrdinalIgnoreCase))
+                {
+                    File.Copy(replacement, targetPath, true);
+                }
+
+                entry.Path = new FileInfo(Path.GetFileName(replacement));
             }
-            catch (OperationCanceledException)
+            else
             {
-                AppendLog("Nested extract cancelled.");
+                _srcFolder ??= Path.GetDirectoryName(replacement);
+                await _archiveService.CopyFileToFolderAsync(replacement, _srcFolder!, CancellationToken.None).ConfigureAwait(false);
+                entry.Path = new FileInfo(Path.GetFileName(replacement));
             }
-            catch (IOException io)
-            {
-                await ShowErrorAsync(io.Message);
-            }
-            catch (UnauthorizedAccessException ua)
-            {
-                await ShowErrorAsync(ua.Message);
-            }
-            finally
-            {
-                _cts = null;
-                UpdateProgress(0, 1);
-            }
+            RefreshTree();
+            SetStatus("File replaced");
+            AppendLog($"Replaced file with: {Path.GetFileName(replacement)}");
+        }
+        catch (Exception ex) { await ShowErrorAsync(ex.Message); }
+    }
+    [Obsolete]
+    private async Task ExtractChunkItemAsync(TreeViewItem node)
+    {
+        if (node.Parent is not TreeViewItem parent || parent.DataContext is not Entry parentEntry)
+        { await ShowWarningAsync("Invalid parent"); return; }
+        if (node.DataContext is not Entry chunkEntry)
+        { await ShowWarningAsync("Invalid chunk"); return; }
+        string? dest = await SelectFolderAsync("Select folder to extract chunk to").ConfigureAwait(false);
+        if (dest is null)
+        {
+            return;
         }
 
-        private async Task ImportFolderToNodeAsync()
+        try
         {
-            var tree = this.FindControl<TreeView>("TreeView");
-            if (tree?.SelectedItem is not TreeViewItem node) { await ShowWarningAsync("Invalid selection"); return; }
+            _cts?.Cancel();
+            _cts = new CancellationTokenSource();
+            await _archiveService.ExtractChunkItemAsync(_archivePath!, parentEntry, chunkEntry, dest, _cts.Token).ConfigureAwait(false);
+            SetStatus($"Extracted {chunkEntry.Path.Name}");
+            AppendLog($"Extracted {chunkEntry.Path.Name} ({chunkEntry.Size} bytes)");
+        }
+        catch (OperationCanceledException) { AppendLog("Extract chunk cancelled."); }
+        catch (Exception ex) { await ShowErrorAsync(ex.Message); }
+        finally { _cts = null; }
+    }
+    [Obsolete]
+    private async Task<byte[]> ReplaceChunkItemAsync(TreeViewItem node)
+    {
+        if (node.Parent is not TreeViewItem parent || parent.DataContext is not Entry parentEntry)
+        { await ShowWarningAsync("Invalid parent"); return []; }
+        if (node.DataContext is not Entry chunkEntry)
+        { await ShowWarningAsync("Invalid chunk"); return []; }
+        string? replacement = await SelectFileAsync().ConfigureAwait(false);
+        if (replacement is null)
+        {
+            return [];
+        }
 
-            if (node.DataContext is not Entry entry || !entry.IsMsnd)
+        try
+        {
+            _cts?.Cancel();
+            _cts = new CancellationTokenSource();
+            if (string.IsNullOrEmpty(_srcFolder))
             {
-                await ShowWarningAsync("Selection not an embedded archive");
-                return;
+                _srcFolder = Path.GetDirectoryName(replacement);
+                if (string.IsNullOrEmpty(_srcFolder))
+                {
+                    await ShowErrorAsync("Cannot determine source folder for replacement");
+                    return [];
+                }
             }
-            string? folder = await SelectFolderAsync("Select folder containing msnd parts").ConfigureAwait(false);
-            if (folder == null) return;
-
-            try
+            string msndTargetPath = Path.Combine(_srcFolder, parentEntry.Path.Name);
+            if (!File.Exists(msndTargetPath))
             {
-                _cts?.Cancel();
-                _cts = new CancellationTokenSource();
-                CancellationToken ct = _cts.Token;
-                byte[] rebuilt = await _archiveService.BuildMsndFromFolderAsync(folder, ct).ConfigureAwait(false);
-                srcFolder ??= folder;
-                string outPath = Path.Combine(srcFolder, entry.Path.Name);
-                await _archiveService.WriteFileAsync(outPath, rebuilt, ct).ConfigureAwait(false);
-                entry.Children.Clear();
-                foreach (Entry child in Msnd.Parse(rebuilt, Path.GetFileNameWithoutExtension(entry.Path.Name)))
+                await _archiveService.ExtractItemAsync(_archivePath!, ArchiveType.DSARC, parentEntry, _srcFolder, _cts.Token);
+                AppendLog($"Extracted base MSND file to {msndTargetPath} for modification");
+            }
+            byte[] rebuilt = await _archiveService.ReplaceChunkItemAsync(
+                _archivePath!, parentEntry, chunkEntry, replacement, _srcFolder, _cts.Token).ConfigureAwait(false);
+            parentEntry.Children.Clear();
+            foreach (Entry child in Msnd.Parse(rebuilt, Path.GetFileNameWithoutExtension(parentEntry.Path.Name)))
+            {
+                parentEntry.Children.Add(child);
+            }
+
+            RefreshTree();
+            SetStatus("File replaced - use Save");
+            AppendLog($"Rebuilt embedded MSND {parentEntry.Path.Name} after replacing {Path.GetExtension(chunkEntry.Path.Name)}");
+            return rebuilt;
+        }
+        catch (OperationCanceledException) { AppendLog("Replace chunk cancelled."); return []; }
+        catch (Exception ex) { await ShowErrorAsync(ex.Message); return []; }
+        finally { _cts = null; }
+    }
+    [Obsolete]
+    private async Task ExtractAllFromNodeAsync(Entry entry)
+    {
+        if (!entry.IsMsnd)
+        {
+            await ShowWarningAsync("Selection is not an embedded archive");
+            return;
+        }
+        string? dest = await SelectFolderAsync("Select root folder for extraction").ConfigureAwait(false);
+        if (dest is null)
+        {
+            return;
+        }
+
+        try
+        {
+            _cts?.Cancel();
+            _cts = new CancellationTokenSource();
+            string outDir = Path.Combine(dest, Path.GetFileNameWithoutExtension(entry.Path.Name));
+            _ = Directory.CreateDirectory(outDir);
+            byte[] msndBuf = await _archiveService.ReadRangeAsync(_archivePath!, entry.Offset, entry.Size, _cts.Token).ConfigureAwait(false);
+            Progress<(int current, int total)> progress = new(t => UpdateProgress(t.current, t.total));
+            await _archiveService.NestedExtractBufferAsync(msndBuf, outDir, Path.GetFileNameWithoutExtension(entry.Path.Name), progress, _cts.Token).ConfigureAwait(false);
+            if (entry.Children.Count == 0)
+            {
+                foreach (Entry child in Msnd.Parse(msndBuf, Path.GetFileNameWithoutExtension(entry.Path.Name)))
                 {
                     entry.Children.Add(child);
                 }
-                RefreshTree();
-                SetStatus("Imported and staged");
-                AppendLog($"Imported and rebuilt embedded archive {entry.Path.Name} (staged to {outPath}).");
             }
-            catch (OperationCanceledException)
-            {
-                AppendLog("Import to node cancelled.");
-            }
-            catch (IOException io)
-            {
-                await ShowErrorAsync(io.Message);
-            }
-            catch (UnauthorizedAccessException ua)
-            {
-                await ShowErrorAsync(ua.Message);
-            }
-            finally
-            {
-                _cts = null;
-            }
+            RefreshTree();
+            SetStatus("Extract complete");
+            AppendLog("Extract complete.");
+        }
+        catch (OperationCanceledException) { AppendLog("Nested extract cancelled."); }
+        catch (Exception ex) { await ShowErrorAsync(ex.Message); }
+        finally { _cts = null; UpdateProgress(0, 1); }
+    }
+    [Obsolete]
+    private async Task ImportFolderToNodeAsync(Entry entry)
+    {
+        if (!entry.IsMsnd)
+        {
+            await ShowWarningAsync("Selection not an embedded archive");
+            return;
+        }
+        string? folder = await SelectFolderAsync("Select folder containing msnd parts").ConfigureAwait(false);
+        if (folder is null)
+        {
+            return;
         }
 
-        private async Task ExtractAllNestedRootAsync()
+        try
         {
-            if (archivePath == null || filetype != ArchiveType.DSARC)
+            _cts?.Cancel();
+            _cts = new CancellationTokenSource();
+            byte[] rebuilt = await _archiveService.BuildMsndFromFolderAsync(folder, _cts.Token).ConfigureAwait(false);
+            _srcFolder ??= folder;
+            string outPath = Path.Combine(_srcFolder, entry.Path.Name);
+            await _archiveService.WriteFileAsync(outPath, rebuilt, _cts.Token).ConfigureAwait(false);
+            entry.Children.Clear();
+            foreach (Entry child in Msnd.Parse(rebuilt, Path.GetFileNameWithoutExtension(entry.Path.Name)))
             {
-                await ShowWarningAsync("Open DSARC first");
+                entry.Children.Add(child);
+            }
+
+            RefreshTree();
+            SetStatus("Imported and staged");
+            AppendLog($"Imported and rebuilt embedded archive {entry.Path.Name} (staged to {outPath}).");
+        }
+        catch (OperationCanceledException) { AppendLog("Import to node cancelled."); }
+        catch (Exception ex) { await ShowErrorAsync(ex.Message); }
+        finally { _cts = null; }
+    }
+    [Obsolete]
+    private async Task ExtractAllNestedRootAsync()
+    {
+        if (_archivePath is null || _filetype != ArchiveType.DSARC)
+        {
+            await ShowWarningAsync("Open DSARC first");
+            return;
+        }
+        string? baseFolder = await SelectFolderAsync("Select base folder for nested extract").ConfigureAwait(false);
+        if (baseFolder is null)
+        {
+            return;
+        }
+
+        string expected = Path.GetFileNameWithoutExtension(_archivePath);
+        string? outdir = ResolveSelectedFolderForExpected(baseFolder, expected, out bool found, out int matches);
+        if (!found)
+        {
+            string candidate = Path.Combine(baseFolder, expected);
+            if (File.Exists(candidate))
+            {
+                await ShowErrorAsync($"File exists cannot create folder: {expected}");
                 return;
             }
-            string? dlg = await SelectFolderAsync("Select base folder for nested extract").ConfigureAwait(false);
-            if (dlg == null) return;
-
-            string expected = Path.GetFileNameWithoutExtension(archivePath);
-            string outdir = ResolveSelectedFolderForExpected(dlg, expected, out bool found, out int matches);
-            if (!found)
-            {
-                string candidate = Path.Combine(dlg, expected);
-                if (File.Exists(candidate))
-                {
-                    await ShowErrorAsync(string.Format(CultureInfo.InvariantCulture, "File exists cannot create folder: {0}", expected));
-                    return;
-                }
-                Directory.CreateDirectory(candidate);
-                AppendLog($"Created folder '{candidate}' for nested extract.");
-                outdir = candidate;
-                found = true;
-                matches = 1;
-            }
-            if (matches > 1)
-            {
-                AppendLog($"Multiple candidate folders matched '{expected}'; using '{outdir}'.");
-            }
-
-            try
-            {
-                _cts?.Cancel();
-                _cts = new CancellationTokenSource();
-                CancellationToken ct = _cts.Token;
-                byte[] buf = await _archiveService.ReadFileAsync(archivePath, ct).ConfigureAwait(false);
-                Progress<(int current, int total)> progress = new(t => UpdateProgress(t.current, t.total));
-                await _archive_service_NestedExtractBufferAsync(buf, outdir, expected, progress, ct).ConfigureAwait(false);
-                SetStatus("Nested extract complete");
-                AppendLog("Nested extract complete.");
-            }
-            catch (OperationCanceledException)
-            {
-                AppendLog("Nested root extract cancelled.");
-            }
-            catch (IOException io)
-            {
-                await ShowErrorAsync(io.Message);
-            }
-            catch (UnauthorizedAccessException ua)
-            {
-                await ShowErrorAsync(ua.Message);
-            }
-            finally
-            {
-                _cts = null;
-                UpdateProgress(0, 1);
-            }
+            _ = Directory.CreateDirectory(candidate);
+            AppendLog($"Created folder '{candidate}' for nested extract.");
+            outdir = candidate;
+            matches = 1;
+        }
+        if (matches > 1)
+        {
+            AppendLog($"Multiple candidate folders matched '{expected}'; using '{outdir}'.");
         }
 
-        private async Task ExtractAllNestedFromNodeAsync()
+        try
         {
-            var tree = this.FindControl<TreeView>("TreeView");
-            if (tree?.SelectedItem is not TreeViewItem node) { await ShowWarningAsync("Invalid selection"); return; }
+            _cts?.Cancel();
+            _cts = new CancellationTokenSource();
+            byte[] buf = await _archiveService.ReadFileAsync(_archivePath, _cts.Token).ConfigureAwait(false);
+            Progress<(int current, int total)> progress = new(t => UpdateProgress(t.current, t.total));
+            await _archiveService.NestedExtractBufferAsync(buf, outdir, expected, progress, _cts.Token).ConfigureAwait(false);
+            SetStatus("Nested extract complete");
+            AppendLog("Nested extract complete.");
+        }
+        catch (OperationCanceledException) { AppendLog("Nested root extract cancelled."); }
+        catch (Exception ex) { await ShowErrorAsync(ex.Message); }
+        finally { _cts = null; UpdateProgress(0, 1); }
+    }
+    [Obsolete]
+    private async Task ExtractAllNestedFromNodeAsync(Entry entry)
+    {
+        string? baseFolder = await SelectFolderAsync("Select base folder for nested extract from node").ConfigureAwait(false);
+        if (baseFolder is null)
+        {
+            return;
+        }
 
-            if (node.DataContext is not Entry entry)
+        string expected = Path.GetFileNameWithoutExtension(entry.Path.Name);
+        string? outdir = ResolveSelectedFolderForExpected(baseFolder, expected, out bool found, out int matches);
+        if (!found)
+        {
+            string candidate = Path.Combine(baseFolder, expected);
+            if (File.Exists(candidate))
             {
-                await ShowWarningAsync("Invalid selection");
+                await ShowErrorAsync($"File exists cannot create folder: {expected}");
                 return;
             }
-            string? dlg = await SelectFolderAsync("Select base folder for nested extract from node").ConfigureAwait(false);
-            if (dlg == null) return;
-            string expected = Path.GetFileNameWithoutExtension(entry.Path.Name);
-            string outdir = ResolveSelectedFolderForExpected(dlg, expected, out bool found, out int matches);
-            if (!found)
-            {
-                string candidate = Path.Combine(dlg, expected);
-                if (File.Exists(candidate))
-                {
-                    await ShowErrorAsync(string.Format(CultureInfo.InvariantCulture, "File exists cannot create folder: {0}", expected));
-                    return;
-                }
-                Directory.CreateDirectory(candidate);
-                AppendLog($"Created folder '{candidate}' for nested extract.");
-                outdir = candidate;
-                found = true;
-                matches = 1;
-            }
-            if (matches > 1)
-            {
-                AppendLog($"Multiple candidate folders matched '{expected}'; using '{outdir}'.");
-            }
-            try
-            {
-                _cts?.Cancel();
-                _cts = new CancellationTokenSource();
-                CancellationToken ct = _cts.Token;
-                byte[] buf = await _archiveService.ReadRangeAsync(archivePath, entry.Offset, entry.Size, ct).ConfigureAwait(false);
-                Progress<(int current, int total)> progress = new(t => UpdateProgress(t.current, t.total));
-                await _archive_service_NestedExtractBufferAsync(buf, outdir, expected, progress, ct).ConfigureAwait(false);
-                SetStatus("Nested extract complete");
-                AppendLog("Nested extract complete.");
-            }
-            catch (OperationCanceledException)
-            {
-                AppendLog("Nested extract from node cancelled.");
-            }
-            catch (IOException io)
-            {
-                await ShowErrorAsync(io.Message);
-            }
-            catch (UnauthorizedAccessException ua)
-            {
-                await ShowErrorAsync(ua.Message);
-            }
-            finally
-            {
-                _cts = null;
-                UpdateProgress(0, 1);
-            }
+            _ = Directory.CreateDirectory(candidate);
+            AppendLog($"Created folder '{candidate}' for nested extract.");
+            outdir = candidate;
+            matches = 1;
+        }
+        if (matches > 1)
+        {
+            AppendLog($"Multiple candidate folders matched '{expected}'; using '{outdir}'.");
         }
 
-        private string? ResolveSelectedFolderForExpected(string selectedPath, string expectedFolderName, out bool found, out int matches)
+        try
         {
-            found = false;
-            matches = 0;
-            if (string.IsNullOrEmpty(selectedPath))
-            {
-                return null;
-            }
-            try
-            {
-                if (string.Equals(Path.GetFileName(selectedPath), expectedFolderName, StringComparison.OrdinalIgnoreCase))
-                {
-                    found = true;
-                    matches = 1;
-                    return selectedPath;
-                }
-                string direct = Path.Combine(selectedPath, expectedFolderName);
-                if (Directory.Exists(direct))
-                {
-                    found = true;
-                    matches = 1;
-                    return direct;
-                }
-                string[] topMatches = Directory.GetDirectories(selectedPath, expectedFolderName, SearchOption.TopDirectoryOnly);
-                if (topMatches?.Length > 0)
-                {
-                    found = true;
-                    matches = topMatches.Length;
-                    return topMatches[0];
-                }
-                string[] recMatches = Directory.GetDirectories(selectedPath, expectedFolderName, SearchOption.AllDirectories);
-                if (recMatches?.Length > 0)
-                {
-                    found = true;
-                    matches = recMatches.Length;
-                    return recMatches[0];
-                }
-            }
-            catch (IOException io)
-            {
-                AppendLog($"ResolveSelectedFolderForExpected error: {io.Message}");
-            }
-            catch (UnauthorizedAccessException ua)
-            {
-                AppendLog($"ResolveSelectedFolderForExpected error: {ua.Message}");
-            }
+            _cts?.Cancel();
+            _cts = new CancellationTokenSource();
+            byte[] buf = await _archiveService.ReadRangeAsync(_archivePath!, entry.Offset, entry.Size, _cts.Token).ConfigureAwait(false);
+            Progress<(int current, int total)> progress = new(t => UpdateProgress(t.current, t.total));
+            await _archiveService.NestedExtractBufferAsync(buf, outdir, expected, progress, _cts.Token).ConfigureAwait(false);
+            SetStatus("Nested extract complete");
+            AppendLog("Nested extract complete.");
+        }
+        catch (OperationCanceledException) { AppendLog("Nested extract from node cancelled."); }
+        catch (Exception ex) { await ShowErrorAsync(ex.Message); }
+        finally { _cts = null; UpdateProgress(0, 1); }
+    }
+    private Entry? GetEntryFromNode(TreeViewItem node)
+    {
+        if (_rootItem?.Items is null)
+        {
             return null;
         }
 
-        private async Task _archive_service_NestedExtractBufferAsync(byte[] buf, string outdir, string baseLabel, IProgress<(int current, int total)> progress, CancellationToken ct)
+        List<TreeViewItem> list = _rootItem.Items.Cast<TreeViewItem>().ToList();
+        int idx = list.IndexOf(node);
+        return idx >= 0 && idx < _entries.Count ? _entries[idx] : null;
+    }
+    private string? ResolveSelectedFolderForExpected(string selectedPath, string expectedFolderName, out bool found, out int matches)
+    {
+        found = false;
+        matches = 0;
+        if (string.IsNullOrEmpty(selectedPath))
         {
-            await _archiveService.NestedExtractBufferAsync(buf, outdir, baseLabel, progress, ct).ConfigureAwait(false);
+            return null;
         }
 
-        #endregion
+        try
+        {
+            if (string.Equals(Path.GetFileName(selectedPath), expectedFolderName, StringComparison.OrdinalIgnoreCase))
+            {
+                found = true; matches = 1; return selectedPath;
+            }
+            string direct = Path.Combine(selectedPath, expectedFolderName);
+            if (Directory.Exists(direct))
+            {
+                found = true; matches = 1; return direct;
+            }
+            string[] topMatches = Directory.GetDirectories(selectedPath, expectedFolderName, SearchOption.TopDirectoryOnly);
+            if (topMatches.Length > 0)
+            {
+                found = true; matches = topMatches.Length; return topMatches[0];
+            }
+            string[] recMatches = Directory.GetDirectories(selectedPath, expectedFolderName, SearchOption.AllDirectories);
+            if (recMatches.Length > 0)
+            {
+                found = true; matches = recMatches.Length; return recMatches[0];
+            }
+        }
+        catch (Exception ex) { AppendLog($"ResolveSelectedFolderForExpected error: {ex.Message}"); }
+        return null;
     }
+    #endregion
 }

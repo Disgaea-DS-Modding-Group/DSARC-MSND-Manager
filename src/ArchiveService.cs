@@ -6,1053 +6,688 @@ using System.Linq;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
-
-namespace Disgaea_DS_Manager
+namespace Disgaea_DS_Manager;
+public interface IArchiveService
 {
-    // NOTE: Ensure your ArchiveType, Entry, ImportResult, TupleComparer, Msnd, Dsarc, Detector, Helpers types are present
-    // and declared 'public' elsewhere so the public IArchiveService signatures compile.
-
-    public interface IArchiveService
-    {
-        Task<Collection<Entry>> LoadArchiveAsync(string archivePath, CancellationToken ct = default);
-        Task SaveArchiveAsync(string path, ArchiveType type, IList<Entry> entries, string srcFolder,
+    Task<Collection<Entry>> LoadArchiveAsync(string archivePath, CancellationToken ct = default);
+    Task SaveArchiveAsync(string path, ArchiveType type, IList<Entry> entries, string srcFolder,
         IProgress<(int current, int total)>? progress, CancellationToken ct, string? originalArchivePath = null);
-        Task<ImportResult> InspectFolderForImportAsync(string folder, CancellationToken ct = default);
-        Task<(string outBase, List<string> mapperLines)> ExtractAllAsync(string archivePath, ArchiveType filetype, string destFolder, IProgress<(int current, int total)>? progress = null, CancellationToken ct = default);
-        Task ExtractItemAsync(string archivePath, ArchiveType filetype, Entry entry, string destFolder, CancellationToken ct = default);
-        Task ExtractChunkItemAsync(string archivePath, Entry parentEntry, Entry chunkEntry, string destFolder, CancellationToken ct = default);
-        Task<byte[]> ReplaceChunkItemAsync(string archivePath, Entry parentEntry, Entry chunkEntry, string replacementFilePath, string srcFolder, CancellationToken ct = default);
-        Task<byte[]> RebuildNestedFromFolderAsync(string folder, CancellationToken ct = default);
-        Task NestedExtractBufferAsync(byte[] buf, string outdir, string baseLabel, IProgress<(int current, int total)>? progress = null, CancellationToken ct = default);
-        Task<Collection<Entry>> ParseDsarcFromBufferAsync(byte[] buf, CancellationToken ct = default);
-        Task<byte[]> BuildDsarcFromFolderAsync(string folder, CancellationToken ct = default);
-        Task<byte[]> BuildMsndFromFolderAsync(string folder, CancellationToken ct = default);
-        Task WriteFileAsync(string path, byte[] data, CancellationToken ct = default);
-        Task<byte[]> ReadFileAsync(string path, CancellationToken ct = default);
-        Task<byte[]> ReadRangeAsync(string path, long offset, int size, CancellationToken ct = default);
-        Task CopyFileToFolderAsync(string sourceFilePath, string destFolder, CancellationToken ct = default);
+    Task<ImportResult> InspectFolderForImportAsync(string folder, CancellationToken ct = default);
+    Task<(string outBase, List<string> mapperLines)> ExtractAllAsync(string archivePath, ArchiveType filetype, string destFolder, IProgress<(int current, int total)>? progress = null, CancellationToken ct = default);
+    Task ExtractItemAsync(string archivePath, ArchiveType filetype, Entry entry, string destFolder, CancellationToken ct = default);
+    Task ExtractChunkItemAsync(string archivePath, Entry parentEntry, Entry chunkEntry, string destFolder, CancellationToken ct = default);
+    Task<byte[]> ReplaceChunkItemAsync(string archivePath, Entry parentEntry, Entry chunkEntry, string replacementFilePath, string srcFolder, CancellationToken ct = default);
+    Task<byte[]> RebuildNestedFromFolderAsync(string folder, CancellationToken ct = default);
+    Task NestedExtractBufferAsync(byte[] buf, string outdir, string baseLabel, IProgress<(int current, int total)>? progress = null, CancellationToken ct = default);
+    Task<Collection<Entry>> ParseDsarcFromBufferAsync(byte[] buf, CancellationToken ct = default);
+    Task<byte[]> BuildDsarcFromFolderAsync(string folder, CancellationToken ct = default);
+    Task<byte[]> BuildMsndFromFolderAsync(string folder, CancellationToken ct = default);
+    Task WriteFileAsync(string path, byte[] data, CancellationToken ct = default);
+    Task<byte[]> ReadFileAsync(string path, CancellationToken ct = default);
+    Task<byte[]> ReadRangeAsync(string path, long offset, int size, CancellationToken ct = default);
+    Task CopyFileToFolderAsync(string sourceFilePath, string destFolder, CancellationToken ct = default);
+}
+internal class ArchiveService : IArchiveService
+{
+    private readonly TupleComparer _tupleComparer = new();
+    private static readonly char[] Separator = ['='];
+    private static readonly string[] SourceExtensions = [".sseq", ".sbnk", ".swar"];
+    private static void AppendLog(string msg)
+    {
+        System.Diagnostics.Debug.WriteLine($"[ArchiveService] {msg}");
     }
 
-    internal class ArchiveService : IArchiveService
+    public async Task<Collection<Entry>> LoadArchiveAsync(string archivePath, CancellationToken ct = default)
     {
-        private readonly TupleComparer _tupleComparer = new();
-        private static readonly char[] separator = new[] { '=' };
-        private static readonly char[] separatorArray = new[] { '=' };
-        private static readonly string[] sourceArray = new[] { ".sseq", ".sbnk", ".swar" };
-
-        private void AppendLog(string msg)
-        {
-            // Simple logging - you can enhance this as needed
-            System.Diagnostics.Debug.WriteLine($"[ArchiveService] {msg}");
-        }
-        public async Task<Collection<Entry>> LoadArchiveAsync(string archivePath, CancellationToken ct = default)
-        {
-            return await Task.Run(() =>
+        return await Task.Run(() =>
             {
                 ArchiveType type = Detector.FromFile(archivePath);
                 return type == ArchiveType.MSND
                     ? Msnd.Parse(File.ReadAllBytes(archivePath), Path.GetFileNameWithoutExtension(archivePath))
                     : Dsarc.Parse(archivePath);
             }, ct).ConfigureAwait(false);
+    }
+
+    public async Task SaveArchiveAsync(string path, ArchiveType type, IList<Entry> entries, string srcFolder,
+        IProgress<(int current, int total)>? progress, CancellationToken ct, string? originalArchivePath = null)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(path);
+        ArgumentNullException.ThrowIfNull(entries);
+        if (entries.Count == 0)
+        {
+            throw new ArgumentException("No entries to save", nameof(entries));
         }
 
-        public async Task SaveArchiveAsync(string path, ArchiveType type, IList<Entry> entries, string srcFolder,
-    IProgress<(int current, int total)>? progress, CancellationToken ct, string? originalArchivePath = null)
+        await Task.Run(() =>
         {
-            if (string.IsNullOrEmpty(path))
-                throw new ArgumentNullException(nameof(path));
-            if (entries == null || entries.Count == 0)
-                throw new ArgumentException("No entries to save", nameof(entries));
-
-            await Task.Run(() =>
+            ct.ThrowIfCancellationRequested();
+            if (type == ArchiveType.MSND)
             {
-                ct.ThrowIfCancellationRequested();
-                if (type == ArchiveType.MSND)
-                {
-                    // MSND saving logic remains the same...
-                    var chunks = new Dictionary<string, byte[]>(StringComparer.OrdinalIgnoreCase);
-                    int total = Msnd.MSNDORDER.Length;
+                SaveMsndArchive(path, srcFolder, entries, progress, ct);
+            }
+            else
+            {
+                SaveDsarcArchive(path, srcFolder, entries, progress, ct, originalArchivePath);
+            }
+        }, ct).ConfigureAwait(false);
+    }
+    private void SaveMsndArchive(string path, string srcFolder, IList<Entry> entries,
+        IProgress<(int current, int total)>? progress, CancellationToken ct)
+    {
+        Dictionary<string, byte[]> chunks = new(StringComparer.OrdinalIgnoreCase);
+        Dictionary<string, string> sourceFiles = GetSourceFilesByExtension(srcFolder);
+        int total = Msnd.MSND_ORDER.Length;
+        for (int i = 0; i < total; i++)
+        {
+            ct.ThrowIfCancellationRequested();
+            string ext = Msnd.MSND_ORDER[i];
+            string? sourcePath = FindSourceFileForExtension(ext, entries, srcFolder, sourceFiles);
+            if (sourcePath is null)
+            {
+                throw new FileNotFoundException($"Missing {ext} file. Searched in: {srcFolder}");
+            }
 
-                    var sourceFilesByExt = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-                    if (Directory.Exists(srcFolder))
-                    {
-                        foreach (string file in Directory.GetFiles(srcFolder, "*.*", SearchOption.AllDirectories))
-                        {
-                            string ext = Path.GetExtension(file).ToLowerInvariant();
-                            if (Msnd.MSNDORDER.Contains(ext))
-                            {
-                                sourceFilesByExt[ext] = file;
-                            }
-                        }
-                    }
-
-                    for (int i = 0; i < total; i++)
-                    {
-                        ct.ThrowIfCancellationRequested();
-                        string ext = Msnd.MSNDORDER[i];
-
-                        string? sourcePath = null;
-                        var entryForExt = entries.FirstOrDefault(e =>
-                            string.Equals(Path.GetExtension(e.Path.Name), ext, StringComparison.OrdinalIgnoreCase));
-
-                        if (entryForExt != null)
-                        {
-                            string candidate = Path.Combine(srcFolder, entryForExt.Path.Name);
-                            if (File.Exists(candidate))
-                            {
-                                sourcePath = candidate;
-                            }
-                            else
-                            {
-                                string[] matches = Directory.GetFiles(srcFolder, $"*{ext}", SearchOption.AllDirectories);
-                                if (matches.Length > 0)
-                                {
-                                    sourcePath = matches[0];
-                                }
-                            }
-                        }
-
-                        if (sourcePath == null && sourceFilesByExt.ContainsKey(ext))
-                        {
-                            sourcePath = sourceFilesByExt[ext];
-                        }
-
-                        if (sourcePath == null)
-                        {
-                            throw new FileNotFoundException($"Missing {ext} file. Searched in: {srcFolder}");
-                        }
-
-                        using (FileStream fs = new FileStream(sourcePath, FileMode.Open, FileAccess.Read, FileShare.Read))
-                        {
-                            byte[] buffer = new byte[fs.Length];
-                            fs.Read(buffer, 0, buffer.Length);
-                            chunks[ext] = buffer;
-                        }
-                        progress?.Report((i + 1, total));
-                    }
-                    File.WriteAllBytes(path, Msnd.Build(chunks));
-                }
-                else
-                {
-                    // DSARC saving with hybrid approach
-                    string mappingPath = Path.Combine(srcFolder, "mapper.txt");
-                    if (File.Exists(mappingPath))
-                    {
-                        var missing = new List<string>();
-                        var pairs = new Collection<Tuple<string, byte[]>>();
-                        string[] lines = File.ReadAllLines(mappingPath, Encoding.UTF8);
-                        int total = lines.Length;
-
-                        // Create lookup for source files
-                        var sourceFiles = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-                        if (Directory.Exists(srcFolder))
-                        {
-                            foreach (string file in Directory.GetFiles(srcFolder, "*.*", SearchOption.AllDirectories))
-                            {
-                                string fileName = Path.GetFileName(file);
-                                sourceFiles[fileName] = file;
-                            }
-                        }
-
-                        for (int i = 0; i < lines.Length; i++)
-                        {
-                            ct.ThrowIfCancellationRequested();
-                            string ln = lines[i];
-                            if (!ln.Contains('=', StringComparison.Ordinal))
-                            {
-                                progress?.Report((i + 1, total));
-                                continue;
-                            }
-                            string[] parts = ln.Split(separator, 2);
-                            string left = parts[0].Trim();
-                            string right = parts[1].Trim();
-
-                            // Check if this file exists in source folder (modified file)
-                            string fileName = Path.GetFileName(right);
-                            if (sourceFiles.ContainsKey(fileName))
-                            {
-                                string sourceFile = sourceFiles[fileName];
-                                using (FileStream fs = new FileStream(sourceFile, FileMode.Open, FileAccess.Read, FileShare.Read))
-                                {
-                                    byte[] fileData = new byte[fs.Length];
-                                    fs.Read(fileData, 0, fileData.Length);
-                                    pairs.Add(Tuple.Create(left, fileData));
-                                }
-                                progress?.Report((i + 1, total));
-                                continue;
-                            }
-
-                            // Check for directory (nested archive)
-                            string candidate = Path.Combine(srcFolder, right);
-                            if (Directory.Exists(candidate))
-                            {
-                                byte[] childBuf = RebuildNestedFromFolderAsync(candidate, ct).GetAwaiter().GetResult();
-                                if (childBuf == null)
-                                {
-                                    missing.Add(right);
-                                    progress?.Report((i + 1, total));
-                                    continue;
-                                }
-                                pairs.Add(Tuple.Create(left, childBuf));
-                                progress?.Report((i + 1, total));
-                                continue;
-                            }
-
-                            // If we have original archive path, try to read from original archive
-                            if (!string.IsNullOrEmpty(originalArchivePath) && File.Exists(originalArchivePath))
-                            {
-                                try
-                                {
-                                    // Find the original entry to get its offset and size
-                                    var originalEntry = entries.FirstOrDefault(e =>
-                                        string.Equals(e.Path.Name, left, StringComparison.OrdinalIgnoreCase));
-                                    if (originalEntry != null && originalEntry.Offset > 0 && originalEntry.Size > 0)
-                                    {
-                                        using (FileStream fs = new FileStream(originalArchivePath, FileMode.Open, FileAccess.Read, FileShare.Read))
-                                        {
-                                            fs.Seek(originalEntry.Offset, SeekOrigin.Begin);
-                                            byte[] fileData = new byte[originalEntry.Size];
-                                            int read = fs.Read(fileData, 0, originalEntry.Size);
-                                            if (read == originalEntry.Size)
-                                            {
-                                                pairs.Add(Tuple.Create(left, fileData));
-                                                progress?.Report((i + 1, total));
-                                                continue;
-                                            }
-                                        }
-                                    }
-                                }
-                                catch (Exception ex)
-                                {
-                                    AppendLog($"Failed to read original entry {left}: {ex.Message}");
-                                }
-                            }
-
-                            // Search for file by name in source folder
-                            string[] matches = Directory.GetFiles(srcFolder, Path.GetFileName(right), SearchOption.AllDirectories);
-                            if (matches.Length > 0)
-                            {
-                                using (FileStream fs = new FileStream(matches[0], FileMode.Open, FileAccess.Read, FileShare.Read))
-                                {
-                                    byte[] fileData = new byte[fs.Length];
-                                    fs.Read(fileData, 0, fileData.Length);
-                                    pairs.Add(Tuple.Create(left, fileData));
-                                }
-                                progress?.Report((i + 1, total));
-                                continue;
-                            }
-                            missing.Add(right);
-                            progress?.Report((i + 1, total));
-                        }
-                        if (missing.Count > 0)
-                        {
-                            throw new FileNotFoundException($"The mapping file references files or folders that are missing:\n{string.Join("\n ", missing)}");
-                        }
-                        File.WriteAllBytes(path, Dsarc.BuildFromPairs(pairs));
-                    }
-                    else
-                    {
-                        // Non-mapper path with hybrid approach
-                        var pairs = new Collection<Tuple<string, byte[]>>();
-                        int total = entries.Count;
-
-                        // Create lookup for source files
-                        var sourceFiles = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-                        if (Directory.Exists(srcFolder))
-                        {
-                            foreach (string file in Directory.GetFiles(srcFolder, "*.*", SearchOption.AllDirectories))
-                            {
-                                string fileName = Path.GetFileName(file);
-                                sourceFiles[fileName] = file;
-                            }
-                        }
-
-                        for (int i = 0; i < entries.Count; i++)
-                        {
-                            ct.ThrowIfCancellationRequested();
-                            Entry e = entries[i];
-                            string fileName = e.Path.Name;
-
-                            // Check if file exists in source folder (modified file)
-                            if (sourceFiles.ContainsKey(fileName))
-                            {
-                                string sourceFile = sourceFiles[fileName];
-                                using (FileStream fs = new FileStream(sourceFile, FileMode.Open, FileAccess.Read, FileShare.Read))
-                                {
-                                    byte[] fileData = new byte[fs.Length];
-                                    fs.Read(fileData, 0, fileData.Length);
-                                    pairs.Add(Tuple.Create(e.Path.ToString(), fileData));
-                                }
-                                progress?.Report((i + 1, total));
-                                continue;
-                            }
-
-                            // If we have original archive path, read from original archive
-                            if (!string.IsNullOrEmpty(originalArchivePath) && File.Exists(originalArchivePath) &&
-                                e.Offset > 0 && e.Size > 0)
-                            {
-                                try
-                                {
-                                    using (FileStream fs = new FileStream(originalArchivePath, FileMode.Open, FileAccess.Read, FileShare.Read))
-                                    {
-                                        fs.Seek(e.Offset, SeekOrigin.Begin);
-                                        byte[] fileData = new byte[e.Size];
-                                        int read = fs.Read(fileData, 0, e.Size);
-                                        if (read == e.Size)
-                                        {
-                                            pairs.Add(Tuple.Create(e.Path.ToString(), fileData));
-                                            progress?.Report((i + 1, total));
-                                            continue;
-                                        }
-                                    }
-                                }
-                                catch (Exception ex)
-                                {
-                                    AppendLog($"Failed to read original entry {fileName}: {ex.Message}");
-                                }
-                            }
-
-                            // Check for directory in source folder
-                            string candidateDir = Path.Combine(srcFolder, e.Path.ToString());
-                            if (Directory.Exists(candidateDir))
-                            {
-                                byte[] childBuf = RebuildNestedFromFolderAsync(candidateDir, ct).GetAwaiter().GetResult();
-                                if (childBuf == null)
-                                    throw new InvalidOperationException($"Failed to rebuild nested archive at {candidateDir}");
-                                pairs.Add(Tuple.Create(e.Path.ToString(), childBuf));
-                                progress?.Report((i + 1, total));
-                                continue;
-                            }
-
-                            // Search for file by name in source folder
-                            string[] matches = Directory.GetFiles(srcFolder, fileName, SearchOption.AllDirectories);
-                            if (matches.Length > 0)
-                            {
-                                using (FileStream fs = new FileStream(matches[0], FileMode.Open, FileAccess.Read, FileShare.Read))
-                                {
-                                    byte[] fileData = new byte[fs.Length];
-                                    fs.Read(fileData, 0, fileData.Length);
-                                    pairs.Add(Tuple.Create(e.Path.ToString(), fileData));
-                                }
-                                progress?.Report((i + 1, total));
-                                continue;
-                            }
-
-                            throw new FileNotFoundException($"Missing source file or folder for entry: {e.Path} (expected at {Path.Combine(srcFolder, e.Path.ToString())})");
-                        }
-                        File.WriteAllBytes(path, Dsarc.BuildFromPairs(pairs));
-                        progress?.Report((1, 1));
-                    }
-                }
-            }, ct).ConfigureAwait(false);
+            chunks[ext] = File.ReadAllBytes(sourcePath);
+            progress?.Report((i + 1, total));
         }
-
-        public async Task<ImportResult> InspectFolderForImportAsync(string folder, CancellationToken ct = default)
+        File.WriteAllBytes(path, Msnd.Build(chunks));
+    }
+    private void SaveDsarcArchive(string path, string srcFolder, IList<Entry> entries,
+        IProgress<(int current, int total)>? progress, CancellationToken ct, string? originalArchivePath)
+    {
+        string mappingPath = Path.Combine(srcFolder, "mapper.txt");
+        Collection<Tuple<string, byte[]>> pairs = File.Exists(mappingPath)
+            ? BuildPairsFromMapper(mappingPath, srcFolder, entries, progress, ct, originalArchivePath)
+            : BuildPairsFromEntries(entries, srcFolder, progress, ct, originalArchivePath);
+        File.WriteAllBytes(path, Dsarc.BuildFromPairs(pairs));
+        progress?.Report((1, 1));
+    }
+    private Collection<Tuple<string, byte[]>> BuildPairsFromMapper(string mappingPath, string srcFolder,
+        IList<Entry> entries, IProgress<(int current, int total)>? progress, CancellationToken ct, string? originalArchivePath)
+    {
+        string[] lines = File.ReadAllLines(mappingPath, Encoding.UTF8);
+        Collection<Tuple<string, byte[]>> pairs = [];
+        Dictionary<string, string> sourceFiles = GetSourceFilesByName(srcFolder);
+        List<string> missingFiles = [];
+        for (int i = 0; i < lines.Length; i++)
         {
-            return await Task.Run(() =>
+            ct.ThrowIfCancellationRequested();
+            string ln = lines[i];
+            if (!ln.Contains('='))
             {
-                ct.ThrowIfCancellationRequested();
-                if (!Directory.Exists(folder))
-                    throw new DirectoryNotFoundException(folder);
+                progress?.Report((i + 1, lines.Length));
+                continue;
+            }
+            string[] parts = ln.Split(Separator, 2);
+            string left = parts[0].Trim();
+            string right = parts[1].Trim();
+            if (!TryGetFileData(left, right, srcFolder, sourceFiles, entries, originalArchivePath, out byte[]? data))
+            {
+                missingFiles.Add(right);
+            }
+            else if (data is not null)
+            {
+                pairs.Add(Tuple.Create(left, data));
+            }
+            progress?.Report((i + 1, lines.Length));
+        }
+        return missingFiles.Count > 0 ? throw new FileNotFoundException($"Missing files:\n{string.Join("\n", missingFiles)}") : pairs;
+    }
+    private Collection<Tuple<string, byte[]>> BuildPairsFromEntries(IList<Entry> entries, string srcFolder,
+        IProgress<(int current, int total)>? progress, CancellationToken ct, string? originalArchivePath)
+    {
+        Collection<Tuple<string, byte[]>> pairs = [];
+        Dictionary<string, string> sourceFiles = GetSourceFilesByName(srcFolder);
+        for (int i = 0; i < entries.Count; i++)
+        {
+            ct.ThrowIfCancellationRequested();
+            Entry entry = entries[i];
+            if (!TryGetFileData(entry.Path.ToString(), entry.Path.Name, srcFolder, sourceFiles, entries, originalArchivePath, out byte[]? data))
+            {
+                throw new FileNotFoundException($"Missing source for: {entry.Path}");
+            }
 
-                var result = new ImportResult { SourceFolder = folder };
-                string mappingFile = Path.Combine(folder, "mapper.txt");
-                if (File.Exists(mappingFile))
+            pairs.Add(Tuple.Create(entry.Path.ToString(), data!));
+            progress?.Report((i + 1, entries.Count));
+        }
+        return pairs;
+    }
+    private bool TryGetFileData(string key, string fileName, string srcFolder, Dictionary<string, string> sourceFiles,
+        IList<Entry> entries, string? originalArchivePath, out byte[]? data)
+    {
+        data = null;
+        if (sourceFiles.TryGetValue(fileName, out string? sourceFile))
+        {
+            data = File.ReadAllBytes(sourceFile);
+            return true;
+        }
+        string candidate = Path.Combine(srcFolder, fileName);
+        if (File.Exists(candidate))
+        {
+            data = File.ReadAllBytes(candidate);
+            return true;
+        }
+        string candidateDir = Path.Combine(srcFolder, fileName);
+        if (Directory.Exists(candidateDir))
+        {
+            data = RebuildNestedFromFolderAsync(candidateDir).GetAwaiter().GetResult();
+            return data != null;
+        }
+        if (!string.IsNullOrEmpty(originalArchivePath) && File.Exists(originalArchivePath))
+        {
+            Entry? originalEntry = entries.FirstOrDefault(e =>
+                string.Equals(e.Path.Name, key, StringComparison.OrdinalIgnoreCase));
+            if (originalEntry is { Offset: > 0, Size: > 0 })
+            {
+                try
                 {
-                    foreach (string ln in File.ReadAllLines(mappingFile, Encoding.UTF8))
-                    {
-                        ct.ThrowIfCancellationRequested();
-                        if (!ln.Contains('=', StringComparison.Ordinal))
-                            continue;
-
-                        string[] parts = ln.Split(separator, 2);
-                        string left = parts[0].Trim();
-                        string right = parts[1].Trim();
-                        string candidate = Path.Combine(folder, right);
-
-                        if (Directory.Exists(candidate))
-                        {
-                            var entry = new Entry(new FileInfo(left));
-                            try
-                            {
-                                byte[] buf = RebuildNestedFromFolderAsync(candidate, ct).GetAwaiter().GetResult();
-                                if (buf != null && buf.Length >= 4 && buf.Take(4).SequenceEqual(Msnd.MAGICMSND))
-                                {
-                                    entry.IsMsnd = true;
-                                    foreach (Entry child in Msnd.Parse(buf, Path.GetFileNameWithoutExtension(entry.Path.Name)))
-                                        entry.Children.Add(child);
-                                }
-                            }
-                            catch (IOException) { }
-                            catch (UnauthorizedAccessException) { }
-                            result.Entries.Add(entry);
-                            continue;
-                        }
-                        if (File.Exists(candidate))
-                        {
-                            result.Entries.Add(new Entry(new FileInfo(left), (int)new FileInfo(candidate).Length, 0));
-                            continue;
-                        }
-                        string[] matches = Directory.GetFiles(folder, Path.GetFileName(right), SearchOption.AllDirectories);
-                        if (matches.Length > 0)
-                        {
-                            result.Entries.Add(new Entry(new FileInfo(left), (int)new FileInfo(matches[0]).Length, 0));
-                        }
-                        else
-                        {
-                            result.Entries.Add(new Entry(new FileInfo(left)));
-                        }
-                    }
-                    result.FileType = ArchiveType.DSARC;
-                    return result;
+                    using FileStream fs = new(originalArchivePath, FileMode.Open, FileAccess.Read);
+                    _ = fs.Seek(originalEntry.Offset, SeekOrigin.Begin);
+                    data = new byte[originalEntry.Size];
+                    return fs.Read(data, 0, data.Length) == originalEntry.Size;
                 }
-
-                var topLevel = Directory.GetFileSystemEntries(folder, "*", SearchOption.TopDirectoryOnly)
-                    .Where(p => !string.Equals(Path.GetFileName(p), "mapper.txt", StringComparison.OrdinalIgnoreCase)).ToList();
-                var allFiles = Directory.GetFiles(folder, "*", SearchOption.AllDirectories)
-                    .Where(f => !f.EndsWith("mapper.txt", StringComparison.OrdinalIgnoreCase)).OrderBy(f => f).ToList();
-
-                var stems = new HashSet<string>(allFiles.Select(f => Path.GetFileNameWithoutExtension(f)));
-                string? stemCandidate = stems.Count == 1 ? stems.First() : null;
-                var exts = new HashSet<string>(allFiles.Select(f => Path.GetExtension(f).ToUpperInvariant()));
-                var msndOrderUpper = new HashSet<string>(Msnd.MSNDORDER.Select(x => x.ToUpperInvariant()));
-
-                bool onlyThree = exts.SetEquals(msndOrderUpper) && allFiles.Count(f => msndOrderUpper.Contains(Path.GetExtension(f).ToUpperInvariant())) == 3;
-                if ((stemCandidate != null && Msnd.MSNDORDER.All(x => exts.Contains(x.ToUpperInvariant()))) || onlyThree)
+                catch (Exception ex)
                 {
-                    result.FileType = ArchiveType.MSND;
-                    foreach (string ext in Msnd.MSNDORDER)
-                    {
-                        string? chosen = null;
-                        if (stemCandidate != null)
-                        {
-                            chosen = allFiles.FirstOrDefault(f => Path.GetFileNameWithoutExtension(f) == stemCandidate && Path.GetExtension(f).Equals(ext, StringComparison.OrdinalIgnoreCase));
-                        }
-                        chosen ??= allFiles.FirstOrDefault(f => Path.GetExtension(f).Equals(ext, StringComparison.OrdinalIgnoreCase));
-                        if (chosen == null)
-                            throw new FileNotFoundException($"Missing expected MSND file {ext}");
-                        result.Entries.Add(new Entry(new FileInfo(Path.GetFileName(chosen))));
-                    }
-                    return result;
+                    AppendLog($"Failed to read original entry {key}: {ex.Message}");
                 }
+            }
+        }
+        return false;
+    }
+    public async Task<ImportResult> InspectFolderForImportAsync(string folder, CancellationToken ct = default)
+    {
+        return await Task.Run(() =>
+        {
+            ct.ThrowIfCancellationRequested();
+            if (!Directory.Exists(folder))
+            {
+                throw new DirectoryNotFoundException(folder);
+            }
 
+            ImportResult result = new() { SourceFolder = folder };
+            string mappingFile = Path.Combine(folder, "mapper.txt");
+            if (File.Exists(mappingFile))
+            {
+                ProcessMapperFile(mappingFile, folder, result, ct);
                 result.FileType = ArchiveType.DSARC;
-                foreach (string p in topLevel)
-                {
-                    ct.ThrowIfCancellationRequested();
-                    if (Directory.Exists(p))
-                    {
-                        var entry = new Entry(new FileInfo(Path.GetFileName(p)));
-                        try
-                        {
-                            byte[] buf = RebuildNestedFromFolderAsync(p, ct).GetAwaiter().GetResult();
-                            if (buf != null && buf.Length >= 4 && buf.Take(4).SequenceEqual(Msnd.MAGICMSND))
-                            {
-                                entry.IsMsnd = true;
-                                foreach (Entry child in Msnd.Parse(buf, Path.GetFileNameWithoutExtension(entry.Path.Name)))
-                                    entry.Children.Add(child);
-                            }
-                        }
-                        catch (IOException) { }
-                        catch (UnauthorizedAccessException) { }
-                        result.Entries.Add(entry);
-                    }
-                    else if (File.Exists(p))
-                    {
-                        string rel = GetRelativePath(folder, p);
-                        result.Entries.Add(new Entry(new FileInfo(rel)));
-                    }
-                }
-                return result;
-            }, ct).ConfigureAwait(false);
-        }
-
-        public async Task<(string outBase, List<string> mapperLines)> ExtractAllAsync(string archivePath, ArchiveType filetype, string destFolder, IProgress<(int current, int total)>? progress = null, CancellationToken ct = default)
-        {
-            if (string.IsNullOrEmpty(archivePath)) throw new ArgumentNullException(nameof(archivePath));
-            if (string.IsNullOrEmpty(destFolder)) throw new ArgumentNullException(nameof(destFolder));
-
-            return await Task.Run(() =>
+            }
+            else
             {
-                ct.ThrowIfCancellationRequested();
-                Collection<Entry> entries = filetype == ArchiveType.MSND ? Msnd.Parse(File.ReadAllBytes(archivePath), Path.GetFileNameWithoutExtension(archivePath)) : Dsarc.Parse(archivePath);
-                string baseOut = Path.Combine(destFolder, Path.GetFileNameWithoutExtension(archivePath));
-                Directory.CreateDirectory(baseOut);
+                ProcessDirectoryContents(folder, result, ct);
+            }
+            return result;
+        }, ct).ConfigureAwait(false);
+    }
 
-                if (filetype == ArchiveType.MSND)
-                {
-                    byte[] buf = File.ReadAllBytes(archivePath);
-                    string baseName = Path.GetFileNameWithoutExtension(archivePath);
-                    if (buf.Length >= Msnd.HDRMSND)
-                    {
-                        byte[] txt = new byte[4];
-                        Array.Copy(buf, 44, txt, 0, Math.Min(4, buf.Length - 44));
-                        File.WriteAllBytes(Path.Combine(baseOut, baseName + ".txt"), txt);
-                    }
-                    int total = entries.Count;
-                    for (int i = 0; i < entries.Count; i++)
-                    {
-                        ct.ThrowIfCancellationRequested();
-                        Entry e = entries[i];
-                        byte[] data = new byte[e.Size];
-                        Array.Copy(buf, e.Offset, data, 0, e.Size);
-                        string target = Path.Combine(baseOut, e.Path.Name);
-                        Directory.CreateDirectory(Path.GetDirectoryName(target) ?? baseOut);
-                        File.WriteAllBytes(target, data);
-                        progress?.Report((i + 1, total));
-                    }
-                    return (baseOut, new List<string>());
-                }
-                else
-                {
-                    long archiveSize = new FileInfo(archivePath).Length;
-                    long dataStart = Dsarc.HDRDSARC + (entries.Count * (Helpers.NAMESZ + Dsarc.ENTRYINFOSZ));
-                    var ranges = entries.Select((e, idx) => new
-                    {
-                        Entry = e,
-                        Index = idx,
-                        Start = (long)e.Offset,
-                        End = (long)e.Offset + e.Size
-                    }).Where(x => x.Start >= dataStart && x.End <= archiveSize && x.Entry.Size >= 0 && x.End >= x.Start)
-                      .OrderBy(x => x.Start)
-                      .ToList();
-
-                    int total = ranges.Count;
-                    string[] extractedNames = new string[entries.Count];
-                    using (FileStream fs = new(archivePath, FileMode.Open, FileAccess.Read))
-                    {
-                        for (int i = 0; i < ranges.Count; i++)
-                        {
-                            ct.ThrowIfCancellationRequested();
-                            var range = ranges[i];
-                            fs.Seek(range.Start, SeekOrigin.Begin);
-                            byte[] data = new byte[range.End - range.Start];
-                            _ = fs.Read(data, 0, data.Length);
-                            string ext = Helpers.GuessExtByMagic(data, range.Entry.Path.Extension);
-                            string baseName = Path.GetFileNameWithoutExtension(range.Entry.Path.Name);
-                            string finalName = UniqueOutName(baseName, ext, baseOut, new Dictionary<Tuple<string, string>, int>(_tupleComparer));
-                            string target = Path.Combine(baseOut, finalName);
-                            Directory.CreateDirectory(Path.GetDirectoryName(target) ?? baseOut);
-                            File.WriteAllBytes(target, data);
-                            extractedNames[range.Index] = finalName;
-                            progress?.Report((i + 1, total));
-                        }
-                    }
-                    List<string> mappingLines = entries.Select((e, idx) => $"{e.Path.Name}={extractedNames[idx] ?? e.Path.Name}").ToList();
-                    File.WriteAllText(Path.Combine(baseOut, "mapper.txt"), string.Join("\n", mappingLines), Encoding.UTF8);
-                    return (baseOut, mappingLines);
-                }
-            }, ct).ConfigureAwait(false);
-        }
-
-        public async Task ExtractItemAsync(string archivePath, ArchiveType filetype, Entry entry, string destFolder, CancellationToken ct = default)
+    private void ProcessMapperFile(string mappingFile, string folder, ImportResult result, CancellationToken ct)
+    {
+        foreach (string ln in File.ReadAllLines(mappingFile, Encoding.UTF8))
         {
-            if (string.IsNullOrEmpty(archivePath))
-                throw new ArgumentNullException(nameof(archivePath));
-            ArgumentNullException.ThrowIfNull(entry);
-            if (string.IsNullOrEmpty(destFolder))
-                throw new ArgumentNullException(nameof(destFolder));
-
-            await Task.Run(() =>
+            ct.ThrowIfCancellationRequested();
+            if (!ln.Contains('='))
             {
-                ct.ThrowIfCancellationRequested();
-                if (filetype == ArchiveType.MSND)
-                {
-                    byte[] buf = File.ReadAllBytes(archivePath);
-                    byte[] data = new byte[entry.Size];
-                    Array.Copy(buf, entry.Offset, data, 0, entry.Size);
-                    string target = Path.Combine(destFolder, entry.Path.Name);
-                    Directory.CreateDirectory(Path.GetDirectoryName(target) ?? destFolder);
-                    File.WriteAllBytes(target, data);
-                }
-                else
-                {
-                    using FileStream fs = new(archivePath, FileMode.Open, FileAccess.Read);
-                    fs.Seek(entry.Offset, SeekOrigin.Begin);
-                    byte[] data = new byte[entry.Size];
-                    _ = fs.Read(data, 0, data.Length);
-                    string ext = Helpers.GuessExtByMagic(data, Path.GetExtension(entry.Path.Name));
-                    string target = Path.Combine(destFolder, Path.GetFileNameWithoutExtension(entry.Path.Name) + ext);
-                    Directory.CreateDirectory(Path.GetDirectoryName(target) ?? destFolder);
-                    File.WriteAllBytes(target, data);
-                }
-            }, ct).ConfigureAwait(false);
-        }
-
-        public async Task ExtractChunkItemAsync(string archivePath, Entry parentEntry, Entry chunkEntry, string destFolder, CancellationToken ct = default)
-        {
-            if (parentEntry == null || chunkEntry == null)
-                throw new ArgumentNullException(parentEntry == null ? nameof(parentEntry) : nameof(chunkEntry));
-            if (string.IsNullOrEmpty(archivePath))
-                throw new ArgumentNullException(nameof(archivePath));
-            if (string.IsNullOrEmpty(destFolder))
-                throw new ArgumentNullException(nameof(destFolder));
-
-            await Task.Run(() =>
-            {
-                ct.ThrowIfCancellationRequested();
-                byte[] msndBuf;
-                using (FileStream fs = new(archivePath, FileMode.Open, FileAccess.Read))
-                {
-                    fs.Seek(parentEntry.Offset, SeekOrigin.Begin);
-                    msndBuf = new byte[parentEntry.Size];
-                    _ = fs.Read(msndBuf, 0, msndBuf.Length);
-                }
-                byte[] data = new byte[chunkEntry.Size];
-                Array.Copy(msndBuf, chunkEntry.Offset, data, 0, chunkEntry.Size);
-                string target = Path.Combine(destFolder, chunkEntry.Path.Name);
-                Directory.CreateDirectory(Path.GetDirectoryName(target) ?? destFolder);
-                File.WriteAllBytes(target, data);
-            }, ct).ConfigureAwait(false);
-        }
-
-        public async Task<byte[]> ReplaceChunkItemAsync(string archivePath, Entry parentEntry, Entry chunkEntry, string replacementFilePath, string srcFolder, CancellationToken ct = default)
-        {
-            if (parentEntry == null || chunkEntry == null)
-                throw new ArgumentNullException(parentEntry == null ? nameof(parentEntry) : nameof(chunkEntry));
-            if (string.IsNullOrEmpty(archivePath))
-                throw new ArgumentNullException(nameof(archivePath));
-            if (string.IsNullOrEmpty(replacementFilePath))
-                throw new ArgumentNullException(nameof(replacementFilePath));
-
-            return await Task.Run(() =>
-            {
-                ct.ThrowIfCancellationRequested();
-                byte[] newData = File.ReadAllBytes(replacementFilePath);
-                byte[] msndBuf;
-                using (FileStream fs = new(archivePath, FileMode.Open, FileAccess.Read))
-                {
-                    fs.Seek(parentEntry.Offset, SeekOrigin.Begin);
-                    msndBuf = new byte[parentEntry.Size];
-                    _ = fs.Read(msndBuf, 0, msndBuf.Length);
-                }
-                byte[] rebuilt = Msnd.ReplaceChunk(msndBuf, Path.GetExtension(chunkEntry.Path.Name).ToLowerInvariant(), newData);
-                if (!string.IsNullOrEmpty(srcFolder))
-                {
-                    string outPath = Path.Combine(srcFolder, parentEntry.Path.Name);
-                    Directory.CreateDirectory(Path.GetDirectoryName(outPath) ?? srcFolder);
-                    File.WriteAllBytes(outPath, rebuilt);
-                }
-                return rebuilt;
-            }, ct).ConfigureAwait(false);
-        }
-
-        public async Task<byte[]> RebuildNestedFromFolderAsync(string folder, CancellationToken ct = default)
-        {
-            return await Task.Run(() =>
-            {
-                ct.ThrowIfCancellationRequested();
-                if (!Directory.Exists(folder))
-                    throw new DirectoryNotFoundException(folder);
-
-                string mapperPath = Path.Combine(folder, "mapper.txt");
-                if (File.Exists(mapperPath))
-                {
-                    var pairs = new Collection<Tuple<string, byte[]>>();
-                    foreach (string ln in File.ReadAllLines(mapperPath, Encoding.UTF8))
-                    {
-                        ct.ThrowIfCancellationRequested();
-                        if (!ln.Contains('=', StringComparison.Ordinal)) continue;
-
-                        string[] parts = ln.Split(separatorArray, 2);
-                        string left = parts[0].Trim();
-                        string right = parts[1].Trim();
-                        string candidatePath = Path.Combine(folder, right);
-                        if (Directory.Exists(candidatePath))
-                        {
-                            byte[] childBuf = RebuildNestedFromFolderAsync(candidatePath, ct).GetAwaiter().GetResult();
-                            if (childBuf == null || childBuf.Length == 0)
-                                throw new InvalidOperationException($"Failed to rebuild nested archive at {candidatePath}");
-                            pairs.Add(Tuple.Create(left, childBuf));
-                            continue;
-                        }
-                        if (File.Exists(candidatePath))
-                        {
-                            pairs.Add(Tuple.Create(left, File.ReadAllBytes(candidatePath)));
-                            continue;
-                        }
-                        string[] matches = Directory.GetFiles(folder, Path.GetFileName(right), SearchOption.AllDirectories);
-                        if (matches.Length > 0)
-                        {
-                            pairs.Add(Tuple.Create(left, File.ReadAllBytes(matches[0])));
-                            continue;
-                        }
-                        throw new FileNotFoundException($"File not found: {candidatePath}");
-                    }
-                    return Dsarc.BuildFromPairs(pairs);
-                }
-
-                string baseName = Path.GetFileName(folder);
-                string[] msndFiles = sourceArray.Select(ext => Directory.GetFiles(folder, $"*{ext}", SearchOption.TopDirectoryOnly).FirstOrDefault()).ToArray();
-                if (msndFiles.Any(f => !string.IsNullOrEmpty(f)))
-                {
-                    var chunks = new Dictionary<string, byte[]>(StringComparer.OrdinalIgnoreCase);
-                    foreach (string ext in Msnd.MSNDORDER)
-                    {
-                        ct.ThrowIfCancellationRequested();
-                        string exact = Path.Combine(folder, baseName + ext);
-                        string? chosen = File.Exists(exact) ? exact : Directory.GetFiles(folder, $"*{ext}", SearchOption.TopDirectoryOnly).FirstOrDefault();
-                        if (chosen == null)
-                            throw new FileNotFoundException($"Missing expected MSND file {ext} in {folder}");
-                        chunks[ext] = File.ReadAllBytes(chosen);
-                    }
-                    byte[]? txtBytes = null;
-                    string txtPath = Path.Combine(folder, baseName + ".txt");
-                    if (File.Exists(txtPath))
-                        txtBytes = File.ReadAllBytes(txtPath);
-                    return Msnd.Build(chunks, txtBytes);
-                }
-
-                string[] files = Directory.GetFiles(folder, "*", SearchOption.TopDirectoryOnly);
-                if (files.Length == 1)
-                    return File.ReadAllBytes(files[0]);
-
-                throw new InvalidOperationException($"Cannot determine archive type to rebuild at {folder}");
-            }, ct).ConfigureAwait(false);
-        }
-
-        public async Task NestedExtractBufferAsync(byte[] buf, string outdir, string baseLabel, IProgress<(int current, int total)>? progress = null, CancellationToken ct = default)
-        {
-            await Task.Run(() =>
-            {
-                ct.ThrowIfCancellationRequested();
-                if (buf == null || outdir == null)
-                    return;
-
-                Directory.CreateDirectory(outdir);
-                if (buf.Length >= 4 && buf.Take(4).SequenceEqual(Msnd.MAGICMSND))
-                {
-                    if (buf.Length >= Msnd.HDRMSND)
-                    {
-                        byte[] txt = new byte[4];
-                        Array.Copy(buf, 44, txt, 0, Math.Min(4, buf.Length - 44));
-                        File.WriteAllBytes(Path.Combine(outdir, baseLabel + ".txt"), txt);
-                    }
-                    Collection<Entry> children = Msnd.Parse(buf, baseLabel);
-                    var counters = new Dictionary<Tuple<string, string>, int>(_tupleComparer);
-                    int total = children.Count;
-                    for (int i = 0; i < children.Count; i++)
-                    {
-                        ct.ThrowIfCancellationRequested();
-                        Entry child = children[i];
-                        byte[] data = new byte[child.Size];
-                        Array.Copy(buf, child.Offset, data, 0, child.Size);
-                        bool childIsDsarc = data.Length >= 8 && data.Take(8).SequenceEqual(Dsarc.MAGICDSARC);
-                        bool childIsMsnd = data.Length >= 4 && data.Take(4).SequenceEqual(Msnd.MAGICMSND);
-                        if (childIsDsarc || childIsMsnd)
-                        {
-                            string folderName = UniqueOutName(Path.GetFileNameWithoutExtension(child.Path.Name), string.Empty, outdir, counters);
-                            string childFolder = Path.Combine(outdir, folderName);
-                            Directory.CreateDirectory(childFolder);
-                            NestedExtractBufferAsync(data, childFolder, Path.GetFileNameWithoutExtension(child.Path.Name), progress, ct).GetAwaiter().GetResult();
-                            if (childIsMsnd)
-                                File.WriteAllBytes(Path.Combine(childFolder, Path.GetFileNameWithoutExtension(child.Path.Name) + ".txt"), Array.Empty<byte>());
-                            else
-                                File.WriteAllBytes(Path.Combine(childFolder, "mapper.txt"), Array.Empty<byte>());
-                        }
-                        else
-                        {
-                            string ext = Helpers.GuessExtByMagic(data, Path.GetExtension(child.Path.Name));
-                            string finalName = UniqueOutName(Path.GetFileNameWithoutExtension(child.Path.Name), ext, outdir, counters);
-                            File.WriteAllBytes(Path.Combine(outdir, finalName), data);
-                        }
-                        progress?.Report((i + 1, total));
-                    }
-                    return;
-                }
-
-                if (buf.Length >= 8 && buf.Take(8).SequenceEqual(Dsarc.MAGICDSARC))
-                {
-                    Collection<Entry> parsed = Dsarc.ParseFromBuffer(buf);
-                    var counters = new Dictionary<Tuple<string, string>, int>(_tupleComparer);
-                    var mappingLines = new List<string>();
-                    int total = parsed.Count;
-                    for (int i = 0; i < parsed.Count; i++)
-                    {
-                        ct.ThrowIfCancellationRequested();
-                        Entry e = parsed[i];
-                        byte[] data = new byte[e.Size];
-                        Array.Copy(buf, e.Offset, data, 0, e.Size);
-                        bool childIsDsarc = data.Length >= 8 && data.Take(8).SequenceEqual(Dsarc.MAGICDSARC);
-                        bool childIsMsnd = data.Length >= 4 && data.Take(4).SequenceEqual(Msnd.MAGICMSND);
-                        if (childIsDsarc || childIsMsnd)
-                        {
-                            string folderName = UniqueOutName(Path.GetFileNameWithoutExtension(e.Path.Name), string.Empty, outdir, counters);
-                            string childFolder = Path.Combine(outdir, folderName);
-                            Directory.CreateDirectory(childFolder);
-                            NestedExtractBufferAsync(data, childFolder, Path.GetFileNameWithoutExtension(e.Path.Name), progress, ct).GetAwaiter().GetResult();
-                            mappingLines.Add($"{e.Path.Name}={folderName}");
-                        }
-                        else
-                        {
-                            string ext = Helpers.GuessExtByMagic(data, Path.GetExtension(e.Path.Name));
-                            string finalName = UniqueOutName(Path.GetFileNameWithoutExtension(e.Path.Name), ext, outdir, counters);
-                            File.WriteAllBytes(Path.Combine(outdir, finalName), data);
-                            mappingLines.Add($"{e.Path.Name}={finalName}");
-                        }
-                        progress?.Report((i + 1, total));
-                    }
-                    File.WriteAllText(Path.Combine(outdir, "mapper.txt"), string.Join("\n", mappingLines), Encoding.UTF8);
-                    return;
-                }
-
-                string fallbackName = UniqueOutName(baseLabel, Path.GetExtension(baseLabel), outdir, new Dictionary<Tuple<string, string>, int>(_tupleComparer));
-                File.WriteAllBytes(Path.Combine(outdir, fallbackName), buf);
-            }, ct).ConfigureAwait(false);
-        }
-
-        public async Task<Collection<Entry>> ParseDsarcFromBufferAsync(byte[] buf, CancellationToken ct = default)
-        {
-            return await Task.Run(() => Dsarc.ParseFromBuffer(buf), ct).ConfigureAwait(false);
-        }
-
-        public async Task<byte[]> BuildDsarcFromFolderAsync(string folder, CancellationToken ct = default)
-        {
-            return await Task.Run(() => BuildDsarcFromFolder(folder), ct).ConfigureAwait(false);
-        }
-
-        public async Task<byte[]> BuildMsndFromFolderAsync(string folder, CancellationToken ct = default)
-        {
-            return await Task.Run(() => BuildMsndFromFolder(folder), ct).ConfigureAwait(false);
-        }
-
-        public async Task WriteFileAsync(string path, byte[] data, CancellationToken ct = default)
-        {
-            if (string.IsNullOrEmpty(path))
-                throw new ArgumentNullException(nameof(path));
-            await Task.Run(() =>
-            {
-                ct.ThrowIfCancellationRequested();
-                Directory.CreateDirectory(Path.GetDirectoryName(path) ?? ".");
-                File.WriteAllBytes(path, data);
-            }, ct).ConfigureAwait(false);
-        }
-
-        public async Task<byte[]> ReadFileAsync(string path, CancellationToken ct = default)
-        {
-            if (string.IsNullOrEmpty(path))
-                throw new ArgumentNullException(nameof(path));
-            return await Task.Run(() =>
-            {
-                ct.ThrowIfCancellationRequested();
-                return File.ReadAllBytes(path);
-            }, ct).ConfigureAwait(false);
-        }
-
-        public async Task<byte[]> ReadRangeAsync(string path, long offset, int size, CancellationToken ct = default)
-        {
-            if (string.IsNullOrEmpty(path))
-                throw new ArgumentNullException(nameof(path));
-            return await Task.Run(() =>
-            {
-                ct.ThrowIfCancellationRequested();
-                using FileStream fs = new(path, FileMode.Open, FileAccess.Read);
-                fs.Seek(offset, SeekOrigin.Begin);
-                byte[] buf = new byte[size];
-                int read = fs.Read(buf, 0, size);
-                if (read != size)
-                {
-                    var trimmed = new byte[read];
-                    Array.Copy(buf, 0, trimmed, 0, read);
-                    return trimmed;
-                }
-                return buf;
-            }, ct).ConfigureAwait(false);
-        }
-
-        public async Task CopyFileToFolderAsync(string sourceFilePath, string destFolder, CancellationToken ct = default)
-        {
-            if (string.IsNullOrEmpty(sourceFilePath))
-                throw new ArgumentNullException(nameof(sourceFilePath));
-            if (string.IsNullOrEmpty(destFolder))
-                throw new ArgumentNullException(nameof(destFolder));
-
-            await Task.Run(() =>
-            {
-                ct.ThrowIfCancellationRequested();
-                Directory.CreateDirectory(destFolder);
-                string dest = Path.Combine(destFolder, Path.GetFileName(sourceFilePath));
-                File.Copy(sourceFilePath, dest, true);
-            }, ct).ConfigureAwait(false);
-        }
-
-        // In ArchiveService.cs - Update the BuildDsarcFromFolder method to handle missing files better
-        // In ArchiveService.cs - Update the BuildDsarcFromFolder method
-        private byte[] BuildDsarcFromFolder(string folder)
-        {
-            if (!Directory.Exists(folder))
-                throw new DirectoryNotFoundException(folder);
-
-            string mapper = Path.Combine(folder, "mapper.txt");
-            if (File.Exists(mapper))
-            {
-                var pairs = new Collection<Tuple<string, byte[]>>();
-                var missingFiles = new List<string>();
-
-                foreach (string ln in File.ReadAllLines(mapper, Encoding.UTF8))
-                {
-                    if (!ln.Contains('=', StringComparison.Ordinal)) continue;
-                    string[] parts = ln.Split(separatorArray, 2);
-                    string left = parts[0].Trim();
-                    string right = parts[1].Trim();
-                    string candidate = Path.Combine(folder, right);
-
-                    if (Directory.Exists(candidate))
-                    {
-                        try
-                        {
-                            byte[] child = RebuildNestedFromFolderAsync(candidate).GetAwaiter().GetResult();
-                            if (child == null || child.Length == 0)
-                                throw new InvalidOperationException($"Failed to rebuild nested archive at {candidate}");
-                            pairs.Add(Tuple.Create(left, child));
-                        }
-                        catch (Exception ex)
-                        {
-                            missingFiles.Add($"{right} (rebuild failed: {ex.Message})");
-                        }
-                        continue;
-                    }
-
-                    // Check for exact file match first
-                    if (File.Exists(candidate))
-                    {
-                        try
-                        {
-                            using (FileStream fs = new FileStream(candidate, FileMode.Open, FileAccess.Read, FileShare.Read))
-                            {
-                                byte[] fileData = new byte[fs.Length];
-                                fs.Read(fileData, 0, fileData.Length);
-                                pairs.Add(Tuple.Create(left, fileData));
-                            }
-                        }
-                        catch (Exception ex)
-                        {
-                            missingFiles.Add($"{right} (read failed: {ex.Message})");
-                        }
-                        continue;
-                    }
-
-                    // If exact match not found, search by filename with extension
-                    string fileName = Path.GetFileName(right);
-                    string[] matches = Directory.GetFiles(folder, fileName, SearchOption.AllDirectories);
-                    if (matches.Length > 0)
-                    {
-                        try
-                        {
-                            using (FileStream fs = new FileStream(matches[0], FileMode.Open, FileAccess.Read, FileShare.Read))
-                            {
-                                byte[] fileData = new byte[fs.Length];
-                                fs.Read(fileData, 0, fileData.Length);
-                                pairs.Add(Tuple.Create(left, fileData));
-                            }
-                        }
-                        catch (Exception ex)
-                        {
-                            missingFiles.Add($"{right} (read failed: {ex.Message})");
-                        }
-                        continue;
-                    }
-                    missingFiles.Add(right);
-                }
-
-                if (missingFiles.Count > 0)
-                {
-                    throw new FileNotFoundException($"The following files referenced in mapper.txt are missing or inaccessible:\n{string.Join("\n", missingFiles)}");
-                }
-                return Dsarc.BuildFromPairs(pairs);
+                continue;
             }
 
-            string[] files = Directory.GetFiles(folder, "*", SearchOption.AllDirectories);
-            var list = new Collection<Tuple<string, byte[]>>();
-            foreach (string f in files)
-            {
-                string rel = GetRelativePath(folder, f);
-                list.Add(Tuple.Create(rel, File.ReadAllBytes(f)));
-            }
-            return Dsarc.BuildFromPairs(list);
+            string[] parts = ln.Split(Separator, 2);
+            string left = parts[0].Trim(), right = parts[1].Trim();
+            string candidate = Path.Combine(folder, right);
+            result.Entries.Add(Directory.Exists(candidate)
+                ? CreateEntryFromDirectory(left, candidate, ct)
+                : new Entry(new FileInfo(left), File.Exists(candidate) ? (int)new FileInfo(candidate).Length : 0));
         }
-
-        // In ArchiveService.cs - Fix the BuildMsndFromFolder method
-        // In ArchiveService.cs - Fix BuildMsndFromFolder and related methods
-        // In ArchiveService.cs - Update the BuildMsndFromFolder method
-        private static byte[] BuildMsndFromFolder(string folder)
+    }
+    private void ProcessDirectoryContents(string folder, ImportResult result, CancellationToken ct)
+    {
+        List<string> allFiles = Directory.GetFiles(folder, "*", SearchOption.AllDirectories)
+            .Where(f => !f.EndsWith("mapper.txt", StringComparison.OrdinalIgnoreCase))
+            .OrderBy(f => f).ToList();
+        List<string> stems = allFiles.Select(f => Path.GetFileNameWithoutExtension(f)).Distinct().ToList();
+        HashSet<string> exts = allFiles.Select(f => Path.GetExtension(f).ToUpperInvariant()).ToHashSet();
+        HashSet<string> msndOrderUpper = Msnd.MSND_ORDER.Select(x => x.ToUpperInvariant()).ToHashSet();
+        if ((stems.Count == 1 && msndOrderUpper.IsSubsetOf(exts)) || exts.SetEquals(msndOrderUpper))
         {
+            result.FileType = ArchiveType.MSND;
+            foreach (string ext in Msnd.MSND_ORDER)
+            {
+                string? file = allFiles.FirstOrDefault(f =>
+                    Path.GetExtension(f).Equals(ext, StringComparison.OrdinalIgnoreCase));
+                if (file is null)
+                {
+                    throw new FileNotFoundException($"Missing MSND file {ext}");
+                }
+
+                result.Entries.Add(new Entry(new FileInfo(Path.GetFileName(file))));
+            }
+            return;
+        }
+        result.FileType = ArchiveType.DSARC;
+        foreach (string item in Directory.GetFileSystemEntries(folder, "*", SearchOption.TopDirectoryOnly))
+        {
+            ct.ThrowIfCancellationRequested();
+            if (Path.GetFileName(item)?.Equals("mapper.txt", StringComparison.OrdinalIgnoreCase) == true)
+            {
+                continue;
+            }
+
+            result.Entries.Add(Directory.Exists(item)
+                ? CreateEntryFromDirectory(Path.GetFileName(item), item, ct)
+                : new Entry(new FileInfo(GetRelativePath(folder, item))));
+        }
+    }
+    private Entry CreateEntryFromDirectory(string name, string directory, CancellationToken ct)
+    {
+        Entry entry = new(new FileInfo(name));
+        try
+        {
+            byte[] buf = RebuildNestedFromFolderAsync(directory, ct).GetAwaiter().GetResult();
+            if (buf?.Length >= 4 && buf.AsSpan(0, 4).SequenceEqual(Msnd.MAGIC_MSND))
+            {
+                entry.IsMsnd = true;
+                foreach (Entry child in Msnd.Parse(buf, Path.GetFileNameWithoutExtension(name)))
+                {
+                    entry.Children.Add(child);
+                }
+            }
+        }
+        catch (IOException) { }
+        catch (UnauthorizedAccessException) { }
+        return entry;
+    }
+    public async Task<(string outBase, List<string> mapperLines)> ExtractAllAsync(string archivePath,
+        ArchiveType filetype, string destFolder, IProgress<(int current, int total)>? progress = null, CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(archivePath);
+        ArgumentException.ThrowIfNullOrEmpty(destFolder);
+        return await Task.Run(() =>
+        {
+            ct.ThrowIfCancellationRequested();
+            Collection<Entry> entries = filetype == ArchiveType.MSND
+                ? Msnd.Parse(File.ReadAllBytes(archivePath), Path.GetFileNameWithoutExtension(archivePath))
+                : Dsarc.Parse(archivePath);
+            string baseOut = Path.Combine(destFolder, Path.GetFileNameWithoutExtension(archivePath));
+            _ = Directory.CreateDirectory(baseOut);
+            return filetype == ArchiveType.MSND
+                ? ExtractMsndArchive(archivePath, baseOut, entries, progress, ct)
+                : ExtractDsarcArchive(archivePath, baseOut, entries, progress, ct);
+        }, ct).ConfigureAwait(false);
+    }
+    private (string outBase, List<string> mapperLines) ExtractMsndArchive(string archivePath, string baseOut,
+        Collection<Entry> entries, IProgress<(int current, int total)>? progress, CancellationToken ct)
+    {
+        byte[] buf = File.ReadAllBytes(archivePath);
+        string baseName = Path.GetFileNameWithoutExtension(archivePath);
+        if (buf.Length >= Msnd.HDR_MSND)
+        {
+            byte[] txtData = buf.AsSpan(44, Math.Min(4, buf.Length - 44)).ToArray();
+            File.WriteAllBytes(Path.Combine(baseOut, baseName + ".txt"), txtData);
+        }
+        for (int i = 0; i < entries.Count; i++)
+        {
+            ct.ThrowIfCancellationRequested();
+            Entry entry = entries[i];
+            byte[] data = buf.AsSpan(entry.Offset, entry.Size).ToArray();
+            string target = Path.Combine(baseOut, entry.Path.Name);
+            _ = Directory.CreateDirectory(Path.GetDirectoryName(target) ?? baseOut);
+            File.WriteAllBytes(target, data);
+            progress?.Report((i + 1, entries.Count));
+        }
+        return (baseOut, []);
+    }
+    private (string outBase, List<string> mapperLines) ExtractDsarcArchive(string archivePath, string baseOut,
+        Collection<Entry> entries, IProgress<(int current, int total)>? progress, CancellationToken ct)
+    {
+        long archiveSize = new FileInfo(archivePath).Length;
+        int dataStart = Dsarc.HDR_DSARC + (entries.Count * (Helpers.NAMESZ + Dsarc.ENTRY_INFO_SZ));
+        var ranges = entries.Select((e, idx) => new { Entry = e, Index = idx, Start = (long)e.Offset, End = (long)e.Offset + e.Size })
+            .Where(x => x.Start >= dataStart && x.End <= archiveSize && x.Entry.Size >= 0 && x.End >= x.Start)
+            .OrderBy(x => x.Start).ToList();
+        string[] extractedNames = new string[entries.Count];
+        Dictionary<Tuple<string, string>, int> counters = new(_tupleComparer);
+        using FileStream fs = new(archivePath, FileMode.Open, FileAccess.Read);
+        for (int i = 0; i < ranges.Count; i++)
+        {
+            ct.ThrowIfCancellationRequested();
+            var range = ranges[i];
+            _ = fs.Seek(range.Start, SeekOrigin.Begin);
+            byte[] data = new byte[range.End - range.Start];
+            _ = fs.Read(data, 0, data.Length);
+            string ext = Helpers.GuessExtByMagic(data, range.Entry.Path.Extension);
+            string finalName = GetUniqueOutputName(Path.GetFileNameWithoutExtension(range.Entry.Path.Name), ext, baseOut, counters);
+            string target = Path.Combine(baseOut, finalName);
+            _ = Directory.CreateDirectory(Path.GetDirectoryName(target) ?? baseOut);
+            File.WriteAllBytes(target, data);
+            extractedNames[range.Index] = finalName;
+            progress?.Report((i + 1, ranges.Count));
+        }
+        List<string> mappingLines = entries.Select((e, idx) => $"{e.Path.Name}={extractedNames[idx] ?? e.Path.Name}").ToList();
+        File.WriteAllText(Path.Combine(baseOut, "mapper.txt"), string.Join("\n", mappingLines), Encoding.UTF8);
+        return (baseOut, mappingLines);
+    }
+    public async Task ExtractItemAsync(string archivePath, ArchiveType filetype, Entry entry, string destFolder, CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(archivePath);
+        ArgumentNullException.ThrowIfNull(entry);
+        ArgumentException.ThrowIfNullOrEmpty(destFolder);
+        await Task.Run(() =>
+        {
+            ct.ThrowIfCancellationRequested();
+            byte[] data = filetype == ArchiveType.MSND
+                ? File.ReadAllBytes(archivePath).AsSpan(entry.Offset, entry.Size).ToArray()
+                : ReadFileRange(archivePath, entry.Offset, entry.Size);
+            string target = Path.Combine(destFolder, filetype == ArchiveType.MSND
+                ? entry.Path.Name
+                : Path.GetFileNameWithoutExtension(entry.Path.Name) + Helpers.GuessExtByMagic(data, entry.Path.Extension));
+            _ = Directory.CreateDirectory(Path.GetDirectoryName(target) ?? destFolder);
+            File.WriteAllBytes(target, data);
+        }, ct).ConfigureAwait(false);
+    }
+    public async Task ExtractChunkItemAsync(string archivePath, Entry parentEntry, Entry chunkEntry, string destFolder, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(parentEntry);
+        ArgumentNullException.ThrowIfNull(chunkEntry);
+        ArgumentException.ThrowIfNullOrEmpty(archivePath);
+        ArgumentException.ThrowIfNullOrEmpty(destFolder);
+        await Task.Run(() =>
+        {
+            ct.ThrowIfCancellationRequested();
+            byte[] msndBuf = ReadFileRange(archivePath, parentEntry.Offset, parentEntry.Size);
+            byte[] data = msndBuf.AsSpan(chunkEntry.Offset, chunkEntry.Size).ToArray();
+            string target = Path.Combine(destFolder, chunkEntry.Path.Name);
+            _ = Directory.CreateDirectory(Path.GetDirectoryName(target) ?? destFolder);
+            File.WriteAllBytes(target, data);
+        }, ct).ConfigureAwait(false);
+    }
+    public async Task<byte[]> ReplaceChunkItemAsync(string archivePath, Entry parentEntry, Entry chunkEntry,
+        string replacementFilePath, string srcFolder, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(parentEntry);
+        ArgumentNullException.ThrowIfNull(chunkEntry);
+        ArgumentException.ThrowIfNullOrEmpty(archivePath);
+        ArgumentException.ThrowIfNullOrEmpty(replacementFilePath);
+        return await Task.Run(() =>
+        {
+            ct.ThrowIfCancellationRequested();
+            byte[] newData = File.ReadAllBytes(replacementFilePath);
+            byte[] msndBuf = ReadFileRange(archivePath, parentEntry.Offset, parentEntry.Size);
+            byte[] rebuilt = Msnd.ReplaceChunk(msndBuf, Path.GetExtension(chunkEntry.Path.Name).ToLowerInvariant(), newData);
+            if (!string.IsNullOrEmpty(srcFolder))
+            {
+                string outPath = Path.Combine(srcFolder, parentEntry.Path.Name);
+                _ = Directory.CreateDirectory(Path.GetDirectoryName(outPath) ?? srcFolder);
+                File.WriteAllBytes(outPath, rebuilt);
+            }
+            return rebuilt;
+        }, ct).ConfigureAwait(false);
+    }
+    public async Task<byte[]> RebuildNestedFromFolderAsync(string folder, CancellationToken ct = default)
+    {
+        return await Task.Run(() =>
+        {
+            ct.ThrowIfCancellationRequested();
             if (!Directory.Exists(folder))
+            {
                 throw new DirectoryNotFoundException(folder);
+            }
 
-            string baseName = Path.GetFileName(folder);
-            var chunks = new Dictionary<string, byte[]>(StringComparer.OrdinalIgnoreCase);
+            string mapperPath = Path.Combine(folder, "mapper.txt");
+            return File.Exists(mapperPath)
+                ? BuildFromMapper(mapperPath, folder, ct)
+                : BuildFromFolderContents(folder);
+        }, ct).ConfigureAwait(false);
+    }
 
-            foreach (string ext in Msnd.MSNDORDER)
+    private byte[] BuildFromMapper(string mapperPath, string folder, CancellationToken ct)
+    {
+        Collection<Tuple<string, byte[]>> pairs = [];
+        foreach (string ln in File.ReadAllLines(mapperPath, Encoding.UTF8))
+        {
+            ct.ThrowIfCancellationRequested();
+            if (!ln.Contains('='))
+            {
+                continue;
+            }
+
+            string[] parts = ln.Split(Separator, 2);
+            string left = parts[0].Trim(), right = parts[1].Trim();
+            string candidatePath = Path.Combine(folder, right);
+            pairs.Add(Tuple.Create(left, Directory.Exists(candidatePath)
+                ? RebuildNestedFromFolderAsync(candidatePath, ct).GetAwaiter().GetResult()
+                : File.ReadAllBytes(FindFile(folder, right))));
+        }
+        return Dsarc.BuildFromPairs(pairs);
+    }
+    private byte[] BuildFromFolderContents(string folder)
+    {
+        string baseName = Path.GetFileName(folder);
+        string?[] msndFiles = SourceExtensions.Select(ext =>
+            Directory.GetFiles(folder, $"*{ext}", SearchOption.TopDirectoryOnly).FirstOrDefault()).ToArray();
+        if (msndFiles.Any(f => !string.IsNullOrEmpty(f)))
+        {
+            Dictionary<string, byte[]> chunks = new(StringComparer.OrdinalIgnoreCase);
+            foreach (string ext in Msnd.MSND_ORDER)
             {
                 string exact = Path.Combine(folder, baseName + ext);
                 string? chosen = File.Exists(exact) ? exact : Directory.GetFiles(folder, $"*{ext}", SearchOption.TopDirectoryOnly).FirstOrDefault();
-                if (chosen == null)
-                    throw new FileNotFoundException($"Missing expected MSND file {ext} in {folder}");
-
-                // Use FileStream with proper disposal and FileShare.Read to avoid locking
-                using (FileStream fileStream = new FileStream(chosen, FileMode.Open, FileAccess.Read, FileShare.Read))
+                if (chosen is null)
                 {
-                    byte[] buffer = new byte[fileStream.Length];
-                    int bytesRead = fileStream.Read(buffer, 0, buffer.Length);
-                    if (bytesRead != buffer.Length)
-                    {
-                        Array.Resize(ref buffer, bytesRead);
-                    }
-                    chunks[ext] = buffer;
+                    throw new FileNotFoundException($"Missing MSND file {ext} in {folder}");
                 }
-            }
 
-            byte[]? txtBytes = null;
+                chunks[ext] = File.ReadAllBytes(chosen);
+            }
             string txtPath = Path.Combine(folder, baseName + ".txt");
-            if (File.Exists(txtPath))
-            {
-                using (FileStream txtStream = new FileStream(txtPath, FileMode.Open, FileAccess.Read, FileShare.Read))
-                {
-                    txtBytes = new byte[txtStream.Length];
-                    txtStream.Read(txtBytes, 0, txtBytes.Length);
-                }
-            }
-
+            byte[]? txtBytes = File.Exists(txtPath) ? File.ReadAllBytes(txtPath) : null;
             return Msnd.Build(chunks, txtBytes);
         }
-
-        // In ArchiveService.cs - Fix the UniqueOutName method
-        private static string UniqueOutName(string baseName, string ext, string outdir, Dictionary<Tuple<string, string>, int> counters)
+        string[] files = Directory.GetFiles(folder, "*", SearchOption.TopDirectoryOnly);
+        return files.Length == 1 ? File.ReadAllBytes(files[0])
+            : throw new InvalidOperationException($"Cannot determine archive type at {folder}");
+    }
+    public async Task NestedExtractBufferAsync(byte[] buf, string outdir, string baseLabel,
+        IProgress<(int current, int total)>? progress = null, CancellationToken ct = default)
+    {
+        await Task.Run(() =>
         {
-            // Use the full filename (including extension) as the key for uniqueness
-            var key = Tuple.Create(baseName, ext ?? string.Empty);
-            if (!counters.TryGetValue(key, out int count)) count = 0;
-            count++;
-            counters[key] = count;
-
-            string candidate = count == 1
-                ? (string.IsNullOrEmpty(ext) ? baseName : $"{baseName}{ext}")
-                : (string.IsNullOrEmpty(ext) ? $"{baseName}_{count}" : $"{baseName}_{count}{ext}");
-
-            string finalName = candidate;
-            int extra = 1;
-
-            // Check for both files and directories with the same name
-            while (File.Exists(Path.Combine(outdir, finalName)) || Directory.Exists(Path.Combine(outdir, finalName)))
+            ct.ThrowIfCancellationRequested();
+            if (buf is null || outdir is null)
             {
-                finalName = string.IsNullOrEmpty(ext)
-                    ? $"{baseName}_{count}_{extra++}"
-                    : $"{baseName}_{count}_{extra++}{ext}";
+                return;
             }
+
+            _ = Directory.CreateDirectory(outdir);
+            if (buf.Length >= 4 && buf.AsSpan(0, 4).SequenceEqual(Msnd.MAGIC_MSND))
+            {
+                ExtractMsndBuffer(buf, outdir, baseLabel, progress, ct);
+            }
+            else if (buf.Length >= 8 && buf.AsSpan(0, 8).SequenceEqual(Dsarc.MAGIC_DSARC))
+            {
+                ExtractDsarcBuffer(buf, outdir, baseLabel, progress, ct);
+            }
+            else
+            {
+                string fallbackName = GetUniqueOutputName(baseLabel, Path.GetExtension(baseLabel), outdir, new Dictionary<Tuple<string, string>, int>(_tupleComparer));
+                File.WriteAllBytes(Path.Combine(outdir, fallbackName), buf);
+            }
+        }, ct).ConfigureAwait(false);
+    }
+    private void ExtractMsndBuffer(byte[] buf, string outdir, string baseLabel,
+        IProgress<(int current, int total)>? progress, CancellationToken ct)
+    {
+        if (buf.Length >= Msnd.HDR_MSND)
+        {
+            byte[] txtData = buf.AsSpan(44, Math.Min(4, buf.Length - 44)).ToArray();
+            File.WriteAllBytes(Path.Combine(outdir, baseLabel + ".txt"), txtData);
+        }
+        Collection<Entry> children = Msnd.Parse(buf, baseLabel);
+        Dictionary<Tuple<string, string>, int> counters = new(_tupleComparer);
+        for (int i = 0; i < children.Count; i++)
+        {
+            ct.ThrowIfCancellationRequested();
+            Entry child = children[i];
+            byte[] data = buf.AsSpan(child.Offset, child.Size).ToArray();
+            _ = ProcessChildEntry(data, child, outdir, counters, progress, ct, i, children.Count);
+        }
+    }
+    private void ExtractDsarcBuffer(byte[] buf, string outdir, string baseLabel,
+        IProgress<(int current, int total)>? progress, CancellationToken ct)
+    {
+        Collection<Entry> parsed = Dsarc.ParseFromBuffer(buf);
+        Dictionary<Tuple<string, string>, int> counters = new(_tupleComparer);
+        List<string> mappingLines = [];
+        for (int i = 0; i < parsed.Count; i++)
+        {
+            ct.ThrowIfCancellationRequested();
+            Entry entry = parsed[i];
+            byte[] data = buf.AsSpan(entry.Offset, entry.Size).ToArray();
+            string outputName = ProcessChildEntry(data, entry, outdir, counters, progress, ct, i, parsed.Count);
+            mappingLines.Add($"{entry.Path.Name}={outputName}");
+        }
+        File.WriteAllText(Path.Combine(outdir, "mapper.txt"), string.Join("\n", mappingLines), Encoding.UTF8);
+    }
+    private string ProcessChildEntry(byte[] data, Entry entry, string outdir,
+        Dictionary<Tuple<string, string>, int> counters, IProgress<(int current, int total)>? progress,
+        CancellationToken ct, int index, int total)
+    {
+        bool isDsarc = data.Length >= 8 && data.AsSpan(0, 8).SequenceEqual(Dsarc.MAGIC_DSARC);
+        bool isMsnd = data.Length >= 4 && data.AsSpan(0, 4).SequenceEqual(Msnd.MAGIC_MSND);
+        if (isDsarc || isMsnd)
+        {
+            string folderName = GetUniqueOutputName(Path.GetFileNameWithoutExtension(entry.Path.Name), string.Empty, outdir, counters);
+            string childFolder = Path.Combine(outdir, folderName);
+            _ = Directory.CreateDirectory(childFolder);
+            NestedExtractBufferAsync(data, childFolder, Path.GetFileNameWithoutExtension(entry.Path.Name), progress, ct).GetAwaiter().GetResult();
+            File.WriteAllBytes(Path.Combine(childFolder, isMsnd ? Path.GetFileNameWithoutExtension(entry.Path.Name) + ".txt" : "mapper.txt"), []);
+            progress?.Report((index + 1, total));
+            return folderName;
+        }
+        else
+        {
+            string ext = Helpers.GuessExtByMagic(data, Path.GetExtension(entry.Path.Name));
+            string finalName = GetUniqueOutputName(Path.GetFileNameWithoutExtension(entry.Path.Name), ext, outdir, counters);
+            File.WriteAllBytes(Path.Combine(outdir, finalName), data);
+            progress?.Report((index + 1, total));
             return finalName;
         }
+    }
+    public Task<Collection<Entry>> ParseDsarcFromBufferAsync(byte[] buf, CancellationToken ct = default)
+    {
+        return Task.Run(() => Dsarc.ParseFromBuffer(buf), ct);
+    }
 
-        private static string AppendDirectorySeparatorChar(string path)
-        {
-            return path.EndsWith(Path.DirectorySeparatorChar.ToString(), StringComparison.Ordinal) ? path : path + Path.DirectorySeparatorChar;
-        }
+    public Task<byte[]> BuildDsarcFromFolderAsync(string folder, CancellationToken ct = default)
+    {
+        return Task.Run(() => BuildFromMapper(Path.Combine(folder, "mapper.txt"), folder, ct), ct);
+    }
 
-        private static string GetRelativePath(string baseDir, string fullPath)
+    public Task<byte[]> BuildMsndFromFolderAsync(string folder, CancellationToken ct = default)
+    {
+        return Task.Run(() => BuildFromFolderContents(folder), ct);
+    }
+
+    public async Task WriteFileAsync(string path, byte[] data, CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(path);
+        await Task.Run(() =>
         {
-            var baseUri = new Uri(AppendDirectorySeparatorChar(baseDir));
-            var fullUri = new Uri(fullPath);
-            return Uri.UnescapeDataString(baseUri.MakeRelativeUri(fullUri).ToString().Replace('/', Path.DirectorySeparatorChar));
+            ct.ThrowIfCancellationRequested();
+            _ = Directory.CreateDirectory(Path.GetDirectoryName(path) ?? ".");
+            File.WriteAllBytes(path, data);
+        }, ct).ConfigureAwait(false);
+    }
+    public async Task<byte[]> ReadFileAsync(string path, CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(path);
+        return await Task.Run(() =>
+        {
+            ct.ThrowIfCancellationRequested();
+            return File.ReadAllBytes(path);
+        }, ct).ConfigureAwait(false);
+    }
+    public async Task<byte[]> ReadRangeAsync(string path, long offset, int size, CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(path);
+        return await Task.Run(() => ReadFileRange(path, offset, size), ct).ConfigureAwait(false);
+    }
+    public async Task CopyFileToFolderAsync(string sourceFilePath, string destFolder, CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(sourceFilePath);
+        ArgumentException.ThrowIfNullOrEmpty(destFolder);
+        await Task.Run(() =>
+        {
+            ct.ThrowIfCancellationRequested();
+            _ = Directory.CreateDirectory(destFolder);
+            File.Copy(sourceFilePath, Path.Combine(destFolder, Path.GetFileName(sourceFilePath)), true);
+        }, ct).ConfigureAwait(false);
+    }
+    private static byte[] ReadFileRange(string path, long offset, int size)
+    {
+        using FileStream fs = new(path, FileMode.Open, FileAccess.Read);
+        _ = fs.Seek(offset, SeekOrigin.Begin);
+        byte[] buf = new byte[size];
+        int read = fs.Read(buf, 0, size);
+        return read == size ? buf : buf[..read];
+    }
+    private static Dictionary<string, string> GetSourceFilesByExtension(string folder)
+    {
+        return Directory.Exists(folder)
+            ? Directory.GetFiles(folder, "*.*", SearchOption.AllDirectories)
+                .Where(f => Msnd.MSND_ORDER.Contains(Path.GetExtension(f).ToLowerInvariant()))
+                .ToDictionary(f => Path.GetExtension(f).ToLowerInvariant(), f => f)
+            : [];
+    }
+
+    private static Dictionary<string, string> GetSourceFilesByName(string folder)
+    {
+        return Directory.Exists(folder)
+                ? Directory.GetFiles(folder, "*.*", SearchOption.AllDirectories)
+                    .ToDictionary(f => Path.GetFileName(f), f => f, StringComparer.OrdinalIgnoreCase)
+                : [];
+    }
+
+    private static string? FindSourceFileForExtension(string ext, IList<Entry> entries, string srcFolder, Dictionary<string, string> sourceFiles)
+    {
+        Entry? entryForExt = entries.FirstOrDefault(e =>
+            Path.GetExtension(e.Path.Name).Equals(ext, StringComparison.OrdinalIgnoreCase));
+        if (entryForExt != null)
+        {
+            string candidate = Path.Combine(srcFolder, entryForExt.Path.Name);
+            if (File.Exists(candidate))
+            {
+                return candidate;
+            }
         }
+        return sourceFiles.GetValueOrDefault(ext) ?? Directory.GetFiles(srcFolder, $"*{ext}", SearchOption.AllDirectories).FirstOrDefault();
+    }
+    private static string FindFile(string folder, string fileName)
+    {
+        string candidate = Path.Combine(folder, fileName);
+        return File.Exists(candidate) ? candidate
+            : Directory.GetFiles(folder, Path.GetFileName(fileName), SearchOption.AllDirectories).FirstOrDefault()
+            ?? throw new FileNotFoundException($"File not found: {fileName}");
+    }
+    private static string GetUniqueOutputName(string baseName, string ext, string outdir, Dictionary<Tuple<string, string>, int> counters)
+    {
+        Tuple<string, string> key = Tuple.Create(baseName, ext ?? string.Empty);
+        counters[key] = counters.GetValueOrDefault(key) + 1;
+        int count = counters[key];
+        string candidate = count == 1 ? $"{baseName}{ext}" : $"{baseName}_{count}{ext}";
+        string finalName = candidate;
+        int extra = 1;
+        while (File.Exists(Path.Combine(outdir, finalName)) || Directory.Exists(Path.Combine(outdir, finalName)))
+        {
+            finalName = count == 1 ? $"{baseName}_{extra++}{ext}" : $"{baseName}_{count}_{extra++}{ext}";
+        }
+        return finalName;
+    }
+    private static string GetRelativePath(string baseDir, string fullPath)
+    {
+        Uri baseUri = new(AppendDirectorySeparator(baseDir));
+        Uri fullUri = new(fullPath);
+        return Uri.UnescapeDataString(baseUri.MakeRelativeUri(fullUri).ToString().Replace('/', Path.DirectorySeparatorChar));
+    }
+    private static string AppendDirectorySeparator(string path)
+    {
+        return path.EndsWith(Path.DirectorySeparatorChar) ? path : path + Path.DirectorySeparatorChar;
     }
 }
