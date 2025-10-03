@@ -4,7 +4,7 @@ using System.Collections.ObjectModel;
 using System.IO;
 using System.Linq;
 using System.Text;
-namespace DisgaeaDS_Manager
+namespace Disgaea_DS_Manager
 {
     internal enum ArchiveType
     {

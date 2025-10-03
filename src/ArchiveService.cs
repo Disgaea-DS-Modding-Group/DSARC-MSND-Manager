@@ -6,7 +6,7 @@ using System.Linq;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
-namespace DisgaeaDS_Manager
+namespace Disgaea_DS_Manager
 {
     internal interface IArchiveService
     {
