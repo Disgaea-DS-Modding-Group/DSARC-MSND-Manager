@@ -6,18 +6,18 @@ using System.Linq;
 using System.Text;
 namespace Disgaea_DS_Manager
 {
-    internal enum ArchiveType
+    public enum ArchiveType
     {
         DSARC,
         MSND
     }
-    internal class ImportResult
+    public class ImportResult
     {
         public ArchiveType FileType { get; set; }
         public Collection<Entry> Entries { get; } = [];
         public required string SourceFolder { get; set; }
     }
-    internal static class Helpers
+    public static class Helpers
     {
         public const int NAMESZ = 40;
         public static byte[] PadName(string n)
@@ -46,7 +46,7 @@ namespace Disgaea_DS_Manager
             return defaultExt;
         }
     }
-    internal class Entry
+    public class Entry
     {
         public FileInfo Path { get; set; }
         public int Size { get; set; }
@@ -61,7 +61,7 @@ namespace Disgaea_DS_Manager
             IsMsnd = isMsnd;
         }
     }
-    internal class TupleComparer : IEqualityComparer<Tuple<string, string>>
+    public class TupleComparer : IEqualityComparer<Tuple<string, string>>
     {
         public bool Equals(Tuple<string, string> x, Tuple<string, string> y)
         {
@@ -80,7 +80,7 @@ namespace Disgaea_DS_Manager
             return h1 ^ h2;
         }
     }
-    internal static class Detector
+    public static class Detector
     {
         private static readonly byte[] MAGICDSARC =
         {
@@ -104,7 +104,7 @@ namespace Disgaea_DS_Manager
                 : throw new InvalidDataException("Unknown archive format (magic mismatch).");
         }
     }
-    internal static class Msnd
+    public static class Msnd
     {
         public const int HDRMSND = 48;
         public static readonly string[] MSNDORDER =
@@ -231,7 +231,7 @@ namespace Disgaea_DS_Manager
             }, txt);
         }
     }
-    internal static class Dsarc
+    public static class Dsarc
     {
         public const int HDRDSARC = 16;
         public const int ENTRYINFOSZ = 8;

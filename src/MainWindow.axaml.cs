@@ -1,3 +1,10 @@
+using Avalonia;
+using Avalonia.Collections;
+using Avalonia.Controls;
+using Avalonia.Input;
+using Avalonia.Interactivity;
+using Avalonia.Threading;
+using Avalonia.VisualTree;
 using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
@@ -6,13 +13,6 @@ using System.IO;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
-using Avalonia.Controls;
-using Avalonia.Interactivity;
-using Avalonia.Threading;
-using System.Collections;
-using Avalonia;
-using Avalonia.Input;
-using Avalonia.VisualTree;
 
 namespace Disgaea_DS_Manager
 {
@@ -27,17 +27,6 @@ namespace Disgaea_DS_Manager
         private readonly IArchiveService _archiveService;
         private CancellationTokenSource? _cts;
 
-        // Controls (found on InitializeComponent)
-        private MenuItem? NewMenu;
-        private MenuItem? OpenMenu;
-        private MenuItem? SaveMenu;
-        private MenuItem? SaveAsMenu;
-        private MenuItem? ExitMenu;
-        private TreeView? TreeView;
-        private TextBox? LogTextBox;
-        private TextBlock? StatusLabel;
-        private ProgressBar? ProgressBar;
-
         public MainWindow() : this(new ArchiveService()) { }
 
         public MainWindow(IArchiveService archiveService)
@@ -45,51 +34,37 @@ namespace Disgaea_DS_Manager
             _archiveService = archiveService ?? throw new ArgumentNullException(nameof(archiveService));
             InitializeComponent();
 
-            // find named controls
-            NewMenu = this.FindControl<MenuItem>("NewMenu");
-            OpenMenu = this.FindControl<MenuItem>("OpenMenu");
-            SaveMenu = this.FindControl<MenuItem>("SaveMenu");
-            SaveAsMenu = this.FindControl<MenuItem>("SaveAsMenu");
-            ExitMenu = this.FindControl<MenuItem>("ExitMenu");
-            TreeView = this.FindControl<TreeView>("TreeView");
-            LogTextBox = this.FindControl<TextBox>("LogTextBox");
-            StatusLabel = this.FindControl<TextBlock>("StatusLabel");
-            ProgressBar = this.FindControl<ProgressBar>("ProgressBar");
-
-            if (!IsDesignTime())
-            {
+            if (!Design.IsDesignMode)
                 WireUpEvents();
-            }
-        }
-
-        private static bool IsDesignTime()
-        {
-            // basic detection — Avalonia doesn't use LicenseManager; keep simple check
-            return Design.IsDesignMode;
         }
 
         private void WireUpEvents()
         {
-            if (NewMenu != null) NewMenu.Click += (_, __) => NewArchive();
-            if (OpenMenu != null) OpenMenu.Click += async (_, __) => await OpenArchiveAsync(_archiveService).ConfigureAwait(false);
-            if (SaveMenu != null) SaveMenu.Click += async (_, __) => await SaveArchiveAsync().ConfigureAwait(false);
-            if (SaveAsMenu != null) SaveAsMenu.Click += async (_, __) => await SaveAsAsync().ConfigureAwait(false);
-            if (ExitMenu != null) ExitMenu.Click += (_, __) => this.Close();
+            var newMenu = this.FindControl<MenuItem>("NewMenu");
+            var openMenu = this.FindControl<MenuItem>("OpenMenu");
+            var saveMenu = this.FindControl<MenuItem>("SaveMenu");
+            var saveAsMenu = this.FindControl<MenuItem>("SaveAsMenu");
+            var exitMenu = this.FindControl<MenuItem>("ExitMenu");
+            var tree = this.FindControl<TreeView>("TreeView");
 
-            if (TreeView != null)
+            if (newMenu != null) newMenu.Click += (_, __) => NewArchive();
+            if (openMenu != null) openMenu.Click += async (_, __) => await OpenArchiveAsync(_archiveService).ConfigureAwait(false);
+            if (saveMenu != null) saveMenu.Click += async (_, __) => await SaveArchiveAsync().ConfigureAwait(false);
+            if (saveAsMenu != null) saveAsMenu.Click += async (_, __) => await SaveAsAsync().ConfigureAwait(false);
+            if (exitMenu != null) exitMenu.Click += (_, __) => Close();
+
+            if (tree != null)
             {
-                // selection changed: update selected node if needed
-                TreeView.AddHandler(InputElement.PointerReleasedEvent, TreeView_PointerReleased, RoutingStrategies.Tunnel);
+                tree.AddHandler(InputElement.PointerReleasedEvent, TreeView_PointerReleased, RoutingStrategies.Tunnel);
             }
         }
 
-        #region Helpers: dialogs + UI thread helpers
+        #region UI helpers
 
         private async Task<string?> SelectFolderAsync(string? title = null)
         {
             var dlg = new OpenFolderDialog();
-            if (!string.IsNullOrEmpty(title))
-                dlg.Title = title;
+            if (!string.IsNullOrEmpty(title)) dlg.Title = title;
             try
             {
                 return await dlg.ShowAsync(this);
@@ -102,20 +77,14 @@ namespace Disgaea_DS_Manager
 
         private async Task<string?> SelectFileAsync(string filter = "All Files (*.*)|*.*")
         {
-            var dlg = new OpenFileDialog();
-            dlg.AllowMultiple = false;
-            // Avalonia's OpenFileDialog doesn't use WinForms-style filter string parsing automatically.
-            // The consumer can pass a single-extension hint instead; we ignore for now.
+            var dlg = new OpenFileDialog { AllowMultiple = false };
             try
             {
-                var result = await dlg.ShowAsync(this);
-                if (result != null && result.Length > 0) return result[0];
-                return null;
+                var res = await dlg.ShowAsync(this);
+                if (res != null && res.Length > 0) return res[0];
             }
-            catch
-            {
-                return null;
-            }
+            catch { }
+            return null;
         }
 
         private async Task<string?> SelectSaveFileAsync(string filter = "All Files (*.*)|*.*")
@@ -125,25 +94,12 @@ namespace Disgaea_DS_Manager
             {
                 return await dlg.ShowAsync(this);
             }
-            catch
-            {
-                return null;
-            }
-        }
-
-        private Task ShowErrorAsync(string msg, string caption = "Error")
-        {
-            return ShowMessageDialogAsync(msg, caption);
-        }
-
-        private Task ShowWarningAsync(string msg, string caption = "Warning")
-        {
-            return ShowMessageDialogAsync(msg, caption);
+            catch { }
+            return null;
         }
 
         private async Task ShowMessageDialogAsync(string text, string title = "")
         {
-            // lightweight modal dialog implemented as a Window to avoid external packages.
             var win = new Window
             {
                 Title = title,
@@ -161,39 +117,32 @@ namespace Disgaea_DS_Manager
                             Margin = new Thickness(0,12,0,0),
                             Children =
                             {
-                                new Button { Content = "OK", IsDefault=true, IsCancel=true, Width = 90, HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Right }
+                                new Button { Content = "OK", IsDefault=true, IsCancel=true, Width = 90 }
                             }
                         }
                     }
                 }
             };
 
-            // wire the button to close
-            var btn = win.FindControl<Button>("") ?? win.GetVisualChildren().OfType<Button>().FirstOrDefault();
-            if (btn != null)
-            {
-                btn.Click += (_, __) => win.Close();
-            }
+            var ok = win.GetVisualDescendants().OfType<Button>().FirstOrDefault();
+            if (ok != null) ok.Click += (_, __) => win.Close();
 
-            try
-            {
-                await win.ShowDialog(this);
-            }
-            catch { /* ignore */ }
+            try { await win.ShowDialog(this); } catch { }
             AppendLog((string.IsNullOrEmpty(title) ? "" : title + ": ") + text);
         }
 
+        private Task ShowErrorAsync(string msg, string caption = "Error") => ShowMessageDialogAsync(msg, caption);
+        private Task ShowWarningAsync(string msg, string caption = "Warning") => ShowMessageDialogAsync(msg, caption);
+
         private void AppendLog(string msg)
         {
-            // Always run on UI thread
             Dispatcher.UIThread.Post(() =>
             {
-                if (LogTextBox != null)
+                var log = this.FindControl<TextBox>("LogTextBox");
+                if (log != null)
                 {
-                    // Append with newline
-                    LogTextBox.Text += $"{msg}\r\n";
-                    // scroll to end — TextBox doesn't have an API to scroll easily, but setting caret could help
-                    LogTextBox.CaretIndex = LogTextBox.Text?.Length ?? 0;
+                    log.Text += $"{msg}\r\n";
+                    log.CaretIndex = log.Text?.Length ?? 0;
                 }
             });
         }
@@ -202,12 +151,11 @@ namespace Disgaea_DS_Manager
         {
             Dispatcher.UIThread.Post(() =>
             {
-                if (ProgressBar == null) return;
+                var pb = this.FindControl<ProgressBar>("ProgressBar");
+                if (pb == null) return;
                 int t = Math.Max(1, total);
-                ProgressBar.Maximum = t;
-                // clamp
-                var value = Math.Min(Math.Max(0, val), t);
-                ProgressBar.Value = value;
+                pb.Maximum = t;
+                pb.Value = Math.Min(Math.Max(0, val), t);
             });
         }
 
@@ -215,23 +163,21 @@ namespace Disgaea_DS_Manager
         {
             Dispatcher.UIThread.Post(() =>
             {
-                if (StatusLabel != null) StatusLabel.Text = text;
+                var lbl = this.FindControl<TextBlock>("StatusLabel");
+                if (lbl != null) lbl.Text = text;
             });
         }
 
         #endregion
 
-        #region Archive operations (ported)
+        #region Archive operations (port of your logic)
+
         private void NewArchive()
         {
-            // show Save dialog to pick path
             _ = Dispatcher.UIThread.InvokeAsync(async () =>
             {
                 string? file = await SelectSaveFileAsync().ConfigureAwait(false);
-                if (string.IsNullOrEmpty(file))
-                {
-                    return;
-                }
+                if (string.IsNullOrEmpty(file)) return;
                 archivePath = file;
                 entries = new Collection<Entry>();
                 srcFolder = null;
@@ -246,7 +192,6 @@ namespace Disgaea_DS_Manager
             string? file = await SelectFileAsync().ConfigureAwait(false);
             if (file == null) return;
             archivePath = file;
-
             try
             {
                 _cts?.Cancel();
@@ -299,7 +244,7 @@ namespace Disgaea_DS_Manager
                 _cts = new CancellationTokenSource();
                 CancellationToken ct = _cts.Token;
                 Progress<(int current, int total)> progress = new(t => UpdateProgress(t.current, t.total));
-                await _archiveService.SaveArchiveAsync(archivePath, filetype.Value, entries, srcFolder, progress, ct).ConfigureAwait(false);
+                await _archiveService.SaveArchiveAsync(archivePath, filetype!.Value, entries.ToList(), srcFolder, progress, ct).ConfigureAwait(false);
                 SetStatus(filetype == ArchiveType.MSND ? "MSND saved" : "DSARC saved");
                 AppendLog($"{filetype.ToString().ToUpper(CultureInfo.InvariantCulture)} saved.");
             }
@@ -334,13 +279,13 @@ namespace Disgaea_DS_Manager
         {
             Dispatcher.UIThread.Post(() =>
             {
-                if (TreeView == null) return;
-                var items = new List<TreeViewItem>();
+                var tree = this.FindControl<TreeView>("TreeView");
+                if (tree == null) return;
 
+                var items = new AvaloniaList<TreeViewItem>();
                 string rootText = archivePath != null ? Path.GetFileName(archivePath) : "[New Archive]";
                 rootItem = new TreeViewItem { Header = rootText, DataContext = null, IsExpanded = true };
 
-                // Build children
                 if (filetype == ArchiveType.DSARC)
                 {
                     foreach (Entry e in entries)
@@ -348,17 +293,18 @@ namespace Disgaea_DS_Manager
                         if (e.IsMsnd && e.Children?.Count > 0)
                         {
                             var msNode = new TreeViewItem { Header = e.Path.Name, DataContext = e, IsExpanded = true };
+                            var childList = new AvaloniaList<TreeViewItem>();
                             foreach (Entry c in e.Children)
                             {
-                                var childNode = new TreeViewItem { Header = c.Path.Name, DataContext = c };
-                                msNode.Items = msNode.Items?.Concat(new[] { childNode }) ?? new[] { childNode };
+                                childList.Add(new TreeViewItem { Header = c.Path.Name, DataContext = c });
                             }
-                            rootItem.Items = rootItem.Items?.Concat(new[] { msNode }) ?? new[] { msNode };
+                            // set the child items via ItemsSourceProperty (not ItemsProperty)
+                            msNode.SetValue(ItemsControl.ItemsSourceProperty, childList);
+                            items.Add(msNode);
                         }
                         else
                         {
-                            var item = new TreeViewItem { Header = e.Path.Name, DataContext = e };
-                            rootItem.Items = rootItem.Items?.Concat(new[] { item }) ?? new[] { item };
+                            items.Add(new TreeViewItem { Header = e.Path.Name, DataContext = e });
                         }
                     }
                 }
@@ -366,85 +312,71 @@ namespace Disgaea_DS_Manager
                 {
                     foreach (Entry e in entries)
                     {
-                        var item = new TreeViewItem { Header = e.Path.Name, DataContext = e };
-                        rootItem.Items = rootItem.Items?.Concat(new[] { item }) ?? new[] { item };
+                        items.Add(new TreeViewItem { Header = e.Path.Name, DataContext = e });
                     }
                 }
 
-                items.Add(rootItem);
-                TreeView.Items = items;
+                // set items via ItemsSourceProperty (Items is read-only)
+                tree.SetValue(ItemsControl.ItemsSourceProperty, items);
+
+                // ensure root is first item if nothing else
+                if (items.Count == 0)
+                {
+                    var onlyRootList = new AvaloniaList<TreeViewItem> { rootItem };
+                    tree.SetValue(ItemsControl.ItemsSourceProperty, onlyRootList);
+                }
             });
         }
 
+
         #endregion
 
-        #region Tree interactions & context menu (simplified)
+        #region Tree & Context menu
+
         private void TreeView_PointerReleased(object? sender, PointerReleasedEventArgs e)
         {
-            try
-            {
-                if (e.InitialPressMouseButton == MouseButton.Right)
-                {
-                    // We will use the currently selected item (TreeView.SelectedItem) when showing the context menu.
-                    // Get the selected item and show a context menu suited to it.
-                    var selected = TreeView?.SelectedItem;
-                    // convert selected to TreeViewItem (if our Items are TreeViewItem objects) or otherwise match by header.
-                    TreeViewItem? node = null;
-                    if (selected is TreeViewItem tvi) node = tvi;
-                    else
-                    {
-                        // our Items are TreeViewItem; SelectedItem may be the Header, so try to find by header
-                        node = FindSelectedTreeViewItem();
-                    }
+            if (e.InitialPressMouseButton != MouseButton.Right) return;
+            var tree = this.FindControl<TreeView>("TreeView");
+            if (tree == null) return;
 
-                    if (node != null)
-                    {
-                        ShowContextMenu(node, e);
-                        e.Handled = true;
-                    }
-                }
+            var sel = tree.SelectedItem;
+            TreeViewItem? node = null;
+            if (sel is TreeViewItem tvi) node = tvi;
+            else
+            {
+                node = tree.GetVisualDescendants().OfType<TreeViewItem>().FirstOrDefault(x =>
+                    (x.DataContext != null && x.DataContext.Equals(sel)) ||
+                    (x.Header != null && x.Header.Equals(sel)));
             }
-            catch { }
+
+            if (node != null)
+            {
+                ShowContextMenu(node);
+                e.Handled = true;
+            }
         }
 
-        private TreeViewItem? FindSelectedTreeViewItem()
+        private void ShowContextMenu(TreeViewItem node)
         {
-            // Try to find the TreeViewItem from tree by searching visual tree (a utility - may not always work depending on templates)
-            if (TreeView == null) return null;
-            var sel = TreeView.SelectedItem;
-            if (sel == null) return null;
-
-            foreach (var child in TreeView.GetVisualDescendants().OfType<TreeViewItem>())
-            {
-                if ((child.DataContext != null && child.DataContext.Equals(sel)) ||
-                    (child.Header != null && child.Header.Equals(sel)))
-                {
-                    return child;
-                }
-            }
-            return null;
-        }
-
-        private void ShowContextMenu(TreeViewItem node, RoutedEventArgs? pointerEvent)
-        {
-            // Build menu items based on whether node is root or an Entry
             var menu = new ContextMenu();
-            var items = new List<MenuItem>();
-
+            var items = new AvaloniaList<MenuItem>();
             bool isRoot = node == rootItem;
 
             if (isRoot)
             {
-                items.Add(new MenuItem { Header = "Import Folder", Command = Avalonia.Input.KeyGesture.Parse("")?.ToCommand() });
-                items.Last().Click += async (_, __) => await ImportFolderAsync().ConfigureAwait(false);
+                var miImport = new MenuItem { Header = "Import Folder" };
+                miImport.Click += async (_, __) => await ImportFolderAsync().ConfigureAwait(false);
+                items.Add(miImport);
 
-                items.Add(new MenuItem { Header = "Extract All" });
-                items.Last().Click += async (_, __) => await ExtractAllAsync().ConfigureAwait(false);
+                var miExtractAll = new MenuItem { Header = "Extract All" };
+                miExtractAll.Click += async (_, __) => await ExtractAllAsync().ConfigureAwait(false);
+                items.Add(miExtractAll);
 
                 if (filetype == ArchiveType.DSARC)
                 {
-                    items.Add(new MenuItem { Header = "Extract All (Nested)" });
-                    items.Last().Click += async (_, __) => await ExtractAllNestedRootAsync().ConfigureAwait(false);
+                    var miNested = new MenuItem { Header = "Extract All (Nested)" };
+                    miNested.Click += async (_, __) => await ExtractAllNestedRootAsync().ConfigureAwait(false);
+                    items.Add(miNested);
                 }
             }
             else
@@ -465,8 +397,6 @@ namespace Disgaea_DS_Manager
                     var mi3 = new MenuItem { Header = "Extract All Nested" };
                     mi3.Click += async (_, __) => await ExtractAllNestedFromNodeAsync(node).ConfigureAwait(false);
                     items.Add(mi3);
-
-                    items.Add(new MenuItem { Header = "-" });
                 }
 
                 if (filetype == ArchiveType.DSARC)
@@ -501,15 +431,15 @@ namespace Disgaea_DS_Manager
                 }
             }
 
-            menu.Items = items;
-            // Open the context menu anchored to the tree view or node
+            // use ItemsSourceProperty instead of assigning Items
+            menu.SetValue(ItemsControl.ItemsSourceProperty, items);
             menu.PlacementTarget = node;
             menu.Open(node);
         }
 
         #endregion
 
-        #region Import / Extract / Replace implementations (ported, minimal changes)
+        #region Import/Export/Replace methods (delegating to _archiveService)
 
         private async Task ImportFolderAsync()
         {
@@ -519,8 +449,8 @@ namespace Disgaea_DS_Manager
             {
                 _cts?.Cancel();
                 _cts = new CancellationTokenSource();
-                CancellationToken ct = _cts.Token;
-                ImportResult result = await _archiveService.InspectFolderForImportAsync(folder, ct).ConfigureAwait(false);
+                var ct = _cts.Token;
+                var result = await _archiveService.InspectFolderForImportAsync(folder, ct).ConfigureAwait(false);
                 if (result?.Entries == null || result.Entries.Count == 0)
                 {
                     await ShowWarningAsync("No files found to import");
@@ -560,14 +490,15 @@ namespace Disgaea_DS_Manager
             }
             string? dlgFolder = await SelectFolderAsync("Choose output folder for Extract All").ConfigureAwait(false);
             if (dlgFolder == null) return;
+
             try
             {
                 _cts?.Cancel();
                 _cts = new CancellationTokenSource();
-                CancellationToken ct = _cts.Token;
+                var ct = _cts.Token;
                 Progress<(int current, int total)> progress = new(t => UpdateProgress(t.current, t.total));
-                (string outBase, List<string> mapper) = await _archive_service_ExtractAllAsync(archivePath, filetype.Value, dlgFolder, progress, ct).ConfigureAwait(false);
-                AppendLog($"Starting Extract All -> {outBase}");
+                var result = await _archiveService.ExtractAllAsync(archivePath, filetype.Value, dlgFolder, progress, ct).ConfigureAwait(false);
+                AppendLog($"Starting Extract All -> {result.outBase}");
                 SetStatus("Extract complete");
                 AppendLog("Extract All complete.");
             }
@@ -590,34 +521,19 @@ namespace Disgaea_DS_Manager
             }
         }
 
-        private async Task<(string outBase, List<string> mapper)> _archive_service_ExtractAllAsync(string path, ArchiveType type, string dest, IProgress<(int current, int total)> progress, CancellationToken ct)
-        {
-            return await _archiveService.ExtractAllAsync(path, type, dest, progress, ct).ConfigureAwait(false);
-        }
-
         private async Task ExtractItemAsync(TreeViewItem node)
         {
-            if (rootItem == null)
-            {
-                await ShowWarningAsync("Invalid selection");
-                return;
-            }
+            if (rootItem == null) { await ShowWarningAsync("Invalid selection"); return; }
 
-            // Determine index of node within rootItem children
             int idx = -1;
             if (rootItem.Items != null)
             {
                 var list = rootItem.Items.Cast<TreeViewItem>().ToList();
                 idx = list.IndexOf(node);
             }
+            if (idx < 0 || idx >= entries.Count) { await ShowWarningAsync("Invalid selection"); return; }
 
-            if (idx < 0 || idx >= entries.Count)
-            {
-                await ShowWarningAsync("Invalid selection");
-                return;
-            }
             Entry e = entries[idx];
-
             string? dest = await SelectFolderAsync("Select folder to extract to").ConfigureAwait(false);
             if (dest == null) return;
 
@@ -625,7 +541,7 @@ namespace Disgaea_DS_Manager
             {
                 _cts?.Cancel();
                 _cts = new CancellationTokenSource();
-                await _archiveService.ExtractItemAsync(archivePath, filetype.Value, e, dest, _cts.Token).ConfigureAwait(false);
+                await _archiveService.ExtractItemAsync(archivePath!, filetype!.Value, e, dest, _cts.Token).ConfigureAwait(false);
                 SetStatus(string.Format(CultureInfo.InvariantCulture, "Extracted {0}", e.Path.Name));
                 AppendLog($"Extracted {e.Path.Name} ({e.Size} bytes)");
             }
@@ -649,22 +565,16 @@ namespace Disgaea_DS_Manager
 
         private async Task ReplaceItemAsync(TreeViewItem node)
         {
-            if (rootItem == null)
-            {
-                await ShowWarningAsync("Invalid selection");
-                return;
-            }
+            if (rootItem == null) { await ShowWarningAsync("Invalid selection"); return; }
+
             int idx = -1;
             if (rootItem.Items != null)
             {
                 var list = rootItem.Items.Cast<TreeViewItem>().ToList();
                 idx = list.IndexOf(node);
             }
-            if (idx < 0 || idx >= entries.Count)
-            {
-                await ShowWarningAsync("Invalid selection");
-                return;
-            }
+            if (idx < 0 || idx >= entries.Count) { await ShowWarningAsync("Invalid selection"); return; }
+
             string? replacement = await SelectFileAsync().ConfigureAwait(false);
             if (replacement == null) return;
 
@@ -676,7 +586,7 @@ namespace Disgaea_DS_Manager
                     return;
                 }
                 srcFolder ??= Path.GetDirectoryName(replacement);
-                await _archiveService.CopyFileToFolderAsync(replacement, srcFolder).ConfigureAwait(false);
+                await _archiveService.CopyFileToFolderAsync(replacement, srcFolder!, CancellationToken.None).ConfigureAwait(false);
                 entries[idx].Path = new FileInfo(Path.GetFileName(replacement));
                 RefreshTree();
                 SetStatus("File replaced");
@@ -693,23 +603,16 @@ namespace Disgaea_DS_Manager
 
         private async Task ExtractChunkItemAsync(TreeViewItem node, TreeViewItem parent)
         {
-            if (parent.DataContext is not Entry parentEntry)
-            {
-                await ShowWarningAsync("Invalid parent");
-                return;
-            }
-            if (node.DataContext is not Entry chunkEntry)
-            {
-                await ShowWarningAsync("Invalid chunk");
-                return;
-            }
+            if (parent.DataContext is not Entry parentEntry) { await ShowWarningAsync("Invalid parent"); return; }
+            if (node.DataContext is not Entry chunkEntry) { await ShowWarningAsync("Invalid chunk"); return; }
             string? dest = await SelectFolderAsync("Select folder to extract chunk to").ConfigureAwait(false);
             if (dest == null) return;
+
             try
             {
                 _cts?.Cancel();
                 _cts = new CancellationTokenSource();
-                await _archiveService.ExtractChunkItemAsync(archivePath, parentEntry, chunkEntry, dest, _cts.Token).ConfigureAwait(false);
+                await _archive_service_ExtractChunkAsync(archivePath!, parentEntry, chunkEntry, dest, _cts.Token).ConfigureAwait(false);
                 SetStatus(string.Format(CultureInfo.InvariantCulture, "Extracted {0}", chunkEntry.Path.Name));
                 AppendLog($"Extracted {chunkEntry.Path.Name} ({chunkEntry.Size} bytes)");
             }
@@ -731,46 +634,45 @@ namespace Disgaea_DS_Manager
             }
         }
 
-        private async Task ReplaceChunkItemAsync(TreeViewItem node, TreeViewItem parent)
+        // small adapter to call IArchiveService extract chunk
+        private Task _archive_service_ExtractChunkAsync(string archivePath, Entry parentEntry, Entry chunkEntry, string dest, CancellationToken ct)
+            => _archiveService.ExtractChunkItemAsync(archivePath, parentEntry, chunkEntry, dest, ct);
+
+        private async Task<byte[]> ReplaceChunkItemAsync(TreeViewItem node, TreeViewItem parent)
         {
-            if (parent.DataContext is not Entry parentEntry)
-            {
-                await ShowWarningAsync("Invalid parent");
-                return;
-            }
-            if (node.DataContext is not Entry chunkEntry)
-            {
-                await ShowWarningAsync("Invalid chunk");
-                return;
-            }
+            if (parent.DataContext is not Entry parentEntry) { await ShowWarningAsync("Invalid parent"); return Array.Empty<byte>(); }
+            if (node.DataContext is not Entry chunkEntry) { await ShowWarningAsync("Invalid chunk"); return Array.Empty<byte>(); }
+
             string? replacement = await SelectFileAsync().ConfigureAwait(false);
-            if (replacement == null) return;
+            if (replacement == null) return Array.Empty<byte>();
 
             try
             {
                 _cts?.Cancel();
                 _cts = new CancellationTokenSource();
-                byte[] rebuilt = await _archiveService.ReplaceChunkItemAsync(archivePath, parentEntry, chunkEntry, replacement, srcFolder, _cts.Token).ConfigureAwait(false);
+                byte[] rebuilt = await _archiveService.ReplaceChunkItemAsync(archivePath!, parentEntry, chunkEntry, replacement, srcFolder ?? string.Empty, _cts.Token).ConfigureAwait(false);
                 parentEntry.Children.Clear();
                 foreach (Entry child in Msnd.Parse(rebuilt, Path.GetFileNameWithoutExtension(parentEntry.Path.Name)))
-                {
                     parentEntry.Children.Add(child);
-                }
                 RefreshTree();
                 SetStatus("File replaced - use Save");
                 AppendLog($"Rebuilt embedded MSND {parentEntry.Path.Name} after replacing {Path.GetExtension(chunkEntry.Path.Name)}");
+                return rebuilt;
             }
             catch (OperationCanceledException)
             {
                 AppendLog("Replace chunk cancelled.");
+                return Array.Empty<byte>();
             }
             catch (IOException io)
             {
                 await ShowErrorAsync(io.Message);
+                return Array.Empty<byte>();
             }
             catch (UnauthorizedAccessException ua)
             {
                 await ShowErrorAsync(ua.Message);
+                return Array.Empty<byte>();
             }
             finally
             {

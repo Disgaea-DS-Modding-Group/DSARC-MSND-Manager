@@ -2,48 +2,45 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         x:Class="Disgaea_DS_Manager.MainWindow"
         Title="DSARC/MSND Manager"
-        Width="1000" Height="700"
-        >
-  <DockPanel LastChildFill="True">
-    <!-- Menu -->
-    <Menu DockPanel.Dock="Top">
-      <MenuItem Header="_File">
-        <MenuItem Name="NewMenu" Header="_New" />
-        <MenuItem Name="OpenMenu" Header="_Open..." />
-        <Separator/>
-        <MenuItem Name="SaveMenu" Header="_Save" />
-        <MenuItem Name="SaveAsMenu" Header="Save _As..." />
-        <Separator/>
-        <MenuItem Name="ExitMenu" Header="E_xit" />
-      </MenuItem>
-    </Menu>
+        Width="1000" Height="700">
+	<DockPanel LastChildFill="True">
+		<!-- Menu -->
+		<Menu DockPanel.Dock="Top">
+			<MenuItem Header="_File">
+				<MenuItem x:Name="NewMenu" Header="_New" />
+				<MenuItem x:Name="OpenMenu" Header="_Open..." />
+				<Separator/>
+				<MenuItem x:Name="SaveMenu" Header="_Save" />
+				<MenuItem x:Name="SaveAsMenu" Header="Save _As..." />
+				<Separator/>
+				<MenuItem x:Name="ExitMenu" Header="E_xit" />
+			</MenuItem>
+		</Menu>
 
-    <!-- Status bar -->
-    <StatusBar DockPanel.Dock="Bottom" Name="StatusBar">
-      <StackPanel Orientation="Horizontal">
-        <TextBlock Name="StatusLabel" Text="Ready" Margin="6,0"/>
-        <ProgressBar Name="ProgressBar" Width="250" Minimum="0" Maximum="1" Value="0" Margin="12,0"/>
-      </StackPanel>
-    </StatusBar>
+		<!-- Status bar (simple StackPanel used to avoid StatusBar availability differences) -->
+		<StackPanel DockPanel.Dock="Bottom" x:Name="StatusBar" Orientation="Horizontal" Margin="6">
+			<TextBlock x:Name="StatusLabel" Text="Ready" VerticalAlignment="Center" />
+			<ProgressBar x:Name="ProgressBar" Width="250" Minimum="0" Maximum="1" Value="0" Margin="12,0" VerticalAlignment="Center"/>
+		</StackPanel>
 
-    <!-- Main content: split vertically: TreeView upper, Log lower -->
-    <Grid>
-      <Grid.RowDefinitions>
-        <RowDefinition Height="*" />
-        <RowDefinition Height="300" />
-      </Grid.RowDefinitions>
+		<!-- Main content: split vertically: TreeView upper, Log lower -->
+		<Grid>
+			<Grid.RowDefinitions>
+				<RowDefinition Height="*" />
+				<RowDefinition Height="300" />
+			</Grid.RowDefinitions>
 
-      <!-- Tree view -->
-      <TreeView Name="TreeView" Grid.Row="0" Margin="6" HorizontalAlignment="Stretch" VerticalAlignment="Stretch" />
+			<!-- Tree view -->
+			<TreeView x:Name="TreeView" Grid.Row="0" Margin="6" HorizontalAlignment="Stretch" VerticalAlignment="Stretch" />
 
-      <!-- Log -->
-      <TextBox Name="LogTextBox"
-               Grid.Row="1"
-               Margin="6"
-               AcceptsReturn="True"
-               IsReadOnly="True"
-               TextWrapping="Wrap"
-               VerticalScrollBarVisibility="Auto" />
-    </Grid>
-  </DockPanel>
+			<!-- Log -->
+			<TextBox x:Name="LogTextBox"
+					 Grid.Row="1"
+					 Margin="6"
+					 AcceptsReturn="True"
+					 IsReadOnly="True"
+					 TextWrapping="Wrap"
+					 ScrollViewer.VerticalScrollBarVisibility="Auto" />
+		</Grid>
+	</DockPanel>
 </Window>
